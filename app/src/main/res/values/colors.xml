@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ink">#101110</color>
+    <color name="surface">#181A18</color>
+    <color name="border">#30342F</color>
+    <color name="paper">#F1F0E9</color>
+    <color name="muted">#9A9E96</color>
+    <color name="acid">#C5F56A</color>
+    <color name="ic_launcher_background">#101110</color>
+</resources>

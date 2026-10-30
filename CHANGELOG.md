@@ -4,6 +4,9 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Release builds are now minified with R8 (roughly half the size of before)
+  while keeping line numbers readable in reported stack traces. Keep the
+  generated `mapping.txt` for each release to deobfuscate crash reports.
 - First-run welcome: a one-time screen that explains the archive in three
   lines and walks through turning on copy detection, including the
   accessibility and overlay permissions it needs.

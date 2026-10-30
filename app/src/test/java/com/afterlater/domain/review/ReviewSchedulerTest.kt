@@ -7,6 +7,8 @@ import com.afterlater.core.model.ReviewUndo
 import com.afterlater.core.model.SavedItem
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -108,6 +110,40 @@ class ReviewSchedulerTest {
     }
 
     @Test
+    fun `a picked snooze date returns the entry at the start of that day`() {
+        val zone = ZoneId.of("UTC")
+        val picked = LocalDate.of(2026, 11, 20)
+
+        assertEquals(
+            picked.atStartOfDay(zone).toInstant(),
+            ReviewScheduler.snoozeUntilDate(now, zone, picked),
+        )
+    }
+
+    @Test
+    fun `a picked snooze date in the past falls back to tomorrow`() {
+        val zone = ZoneId.of("UTC")
+        val yesterday = LocalDate.of(2026, 1, 9)
+
+        assertEquals(
+            now.plus(Duration.ofDays(1)),
+            ReviewScheduler.snoozeUntilDate(now, zone, yesterday),
+        )
+    }
+
+    @Test
+    fun `a live deadline clamps a picked snooze date`() {
+        val zone = ZoneId.of("UTC")
+        val picked = LocalDate.of(2026, 12, 1)
+        val deadline = now.plus(Duration.ofDays(3))
+
+        assertEquals(
+            deadline,
+            ReviewScheduler.snoozeUntilDate(now, zone, picked, deadline),
+        )
+    }
+
+    @Test
     fun `daily batch prioritizes never reviewed entries then older saves`() {
         val reviewedOldest = item(
             id = "reviewed-oldest",
@@ -177,8 +213,8 @@ class ReviewSchedulerTest {
     }
 
     @Test
-    fun `daily batch is capped at three even when callers ask for more`() {
-        val candidates = (1..5).map { index ->
+    fun `daily batch is capped at five even when callers ask for more`() {
+        val candidates = (1..7).map { index ->
             item(
                 id = "item-$index",
                 domain = "site$index.com",
@@ -187,9 +223,9 @@ class ReviewSchedulerTest {
             )
         }
 
-        assertEquals(3, ReviewScheduler.MAX_DAILY_ITEMS)
-        assertEquals(3, AppSettings.MAX_DAILY_LIMIT)
-        assertEquals(3, ReviewScheduler.selectDailyBatch(candidates, limit = 5, now = now).size)
+        assertEquals(5, ReviewScheduler.MAX_DAILY_ITEMS)
+        assertEquals(5, AppSettings.MAX_DAILY_LIMIT)
+        assertEquals(5, ReviewScheduler.selectDailyBatch(candidates, limit = 8, now = now).size)
     }
 
     @Test

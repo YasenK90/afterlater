@@ -6,6 +6,7 @@ import com.afterlater.core.database.AfterLaterDatabase
 import com.afterlater.data.metadata.MetadataExtractor
 import com.afterlater.data.metadata.MetadataScheduler
 import com.afterlater.data.metadata.WorkManagerMetadataScheduler
+import com.afterlater.core.crash.CrashReportStore
 import com.afterlater.data.export.ArchiveBackupManager
 import com.afterlater.data.export.AutoBackupManager
 import com.afterlater.data.reminder.ReminderNotifier
@@ -59,4 +60,6 @@ class AppContainer(context: Context) {
     val autoBackupManager: AutoBackupManager by lazy {
         AutoBackupManager(appContext, settingsRepository, archiveBackupManager, clock)
     }
+
+    val crashReportStore: CrashReportStore by lazy { CrashReportStore(appContext) }
 }

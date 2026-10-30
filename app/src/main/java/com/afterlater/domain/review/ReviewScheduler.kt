@@ -4,6 +4,8 @@ import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.SavedItem
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * Deterministic rediscovery rules. Nothing here touches Android or a database,
@@ -13,7 +15,7 @@ object ReviewScheduler {
 
     val FIRST_REVIEW_DELAY: Duration = Duration.ofHours(24)
     val REVIEW_INTERVAL: Duration = Duration.ofDays(7)
-    val MAX_DAILY_ITEMS: Int = 3
+    val MAX_DAILY_ITEMS: Int = 5
 
     fun initialNextReviewAt(savedAt: Instant): Instant = savedAt.plus(FIRST_REVIEW_DELAY)
 
@@ -41,6 +43,22 @@ object ReviewScheduler {
     fun snoozeUntil(now: Instant, window: SnoozeWindow, expiresAt: Instant? = null): Instant {
         val requested = now.plus(window.duration)
         return if (expiresAt != null && expiresAt.isBefore(requested)) expiresAt else requested
+    }
+
+    /**
+     * Snoozing to a picked date returns the entry at the start of that day
+     * (local time). A date that is not in the future falls back to tomorrow,
+     * and a live deadline clamps the result exactly like [snoozeUntil].
+     */
+    fun snoozeUntilDate(
+        now: Instant,
+        zone: ZoneId,
+        targetDate: LocalDate,
+        expiresAt: Instant? = null,
+    ): Instant {
+        val requested = targetDate.atStartOfDay(zone).toInstant()
+        val effective = if (requested.isAfter(now)) requested else now.plus(Duration.ofDays(1))
+        return if (expiresAt != null && expiresAt.isBefore(effective)) expiresAt else effective
     }
 
     private fun SavedItem.reviewedSinceSaving(): Boolean =
@@ -91,7 +109,14 @@ object ReviewScheduler {
     }
 }
 
-enum class SnoozeWindow(val duration: Duration) {
-    TOMORROW(Duration.ofDays(1)),
-    NEXT_WEEK(Duration.ofDays(7)),
+/**
+ * A snooze span. [TOMORROW] and [NEXT_WEEK] are the named presets; a date the
+ * user picks in the snooze dialog becomes a plain duration-based window built
+ * from [ReviewScheduler.snoozeUntilDate].
+ */
+data class SnoozeWindow(val duration: Duration) {
+    companion object {
+        val TOMORROW = SnoozeWindow(Duration.ofDays(1))
+        val NEXT_WEEK = SnoozeWindow(Duration.ofDays(7))
+    }
 }

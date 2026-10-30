@@ -677,7 +677,7 @@ private fun TagLabel(name: String) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TagEditDialog(
+internal fun TagEditDialog(
     available: List<String>,
     selected: Set<String>,
     onDismiss: () -> Unit,

@@ -9,6 +9,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.afterlater.AfterLaterApplication
+import com.afterlater.core.crash.CrashReportStore
+import com.afterlater.core.crash.CrashSummary
 import com.afterlater.core.model.AppSettings
 import com.afterlater.core.model.AppTheme
 import com.afterlater.data.export.ArchiveBackupService
@@ -21,11 +23,13 @@ import com.afterlater.data.repository.AutoBackupState
 import com.afterlater.data.repository.SavedItemRepository
 import com.afterlater.data.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -41,6 +45,7 @@ class SettingsViewModel(
     private val backupService: ArchiveBackupService,
     private val reminderScheduler: ReminderScheduler,
     private val autoBackupManager: AutoBackupManager,
+    private val crashReportStore: CrashReportStore,
 ) : ViewModel() {
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -65,6 +70,16 @@ class SettingsViewModel(
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _crashSummary = MutableStateFlow<CrashSummary?>(null)
+    val crashSummary: StateFlow<CrashSummary?> = _crashSummary.asStateFlow()
+
+    private val shareChannel = Channel<String>(Channel.BUFFERED)
+    val shareEvents = shareChannel.receiveAsFlow()
+
+    init {
+        refreshCrashSummary()
+    }
 
     fun setDailyLimit(limit: Int) {
         viewModelScope.launch {
@@ -156,6 +171,38 @@ class SettingsViewModel(
             } catch (_: Exception) {
                 _message.value = "The automatic backup setting could not be saved."
             }
+        }
+    }
+
+    fun shareDebugInfo() {
+        viewModelScope.launch {
+            try {
+                val text = withContext(Dispatchers.IO) { crashReportStore.reportText() }
+                shareChannel.send(text)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _message.value = "The debug info could not be read."
+            }
+        }
+    }
+
+    fun clearCrashReports() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { crashReportStore.clear() }
+                _crashSummary.value = CrashSummary(count = 0, latestAtMillis = null)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _message.value = "The crash reports could not be cleared."
+            }
+        }
+    }
+
+    private fun refreshCrashSummary() {
+        viewModelScope.launch {
+            _crashSummary.value = withContext(Dispatchers.IO) { crashReportStore.summary() }
         }
     }
 
@@ -274,6 +321,7 @@ class SettingsViewModel(
                     backupService = app.container.archiveBackupManager,
                     reminderScheduler = app.container.reminderScheduler,
                     autoBackupManager = app.container.autoBackupManager,
+                    crashReportStore = app.container.crashReportStore,
                 )
             }
         }

@@ -4,6 +4,18 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Compose UI tests now run on the JVM (Robolectric): the snooze dialog's
+  presets and date picker, the tag editor's toggling and confirm order, and
+  the archive's status pills are exercised as real UI — the suite grew from
+  149 to 161 tests.
+- The daily batch can now go up to five entries (three remains the default),
+  so the Settings stepper actually has room to grow, and snoozing gains a
+  **Pick a date** option alongside tomorrow and next week — a picked date
+  returns the entry at the start of that day.
+- Crash capture: uncaught crashes are kept locally (the newest five) and can
+  be shared from Settings → About as a debug report with the app version,
+  device, and traces. Nothing is uploaded automatically; clear the log from
+  the same place.
 - Release builds are now minified with R8 (roughly half the size of before)
   while keeping line numbers readable in reported stack traces. Keep the
   generated `mapping.txt` for each release to deobfuscate crash reports.

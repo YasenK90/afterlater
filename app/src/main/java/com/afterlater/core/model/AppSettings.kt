@@ -14,7 +14,7 @@ data class AppSettings(
     companion object {
         const val DEFAULT_DAILY_LIMIT = 3
         const val MIN_DAILY_LIMIT = 1
-        const val MAX_DAILY_LIMIT = 3
+        const val MAX_DAILY_LIMIT = 5
         const val DEFAULT_REMINDER_HOUR = 8
         const val DEFAULT_REMINDER_MINUTE = 0
     }

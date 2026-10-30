@@ -47,14 +47,6 @@ class FakeSavedItemRepository(
     var deleteResult: Boolean = false
     var lastDeadlineChoice: ExpiryChoice? = null
 
-    override fun observeArchive(
-        query: String,
-        statuses: Set<ItemStatus>?,
-        domain: String?,
-        tag: String?,
-        sort: ArchiveSort,
-    ): Flow<List<SavedItem>> = flowOf(emptyList())
-
     override fun observeItem(id: String): Flow<SavedItem?> = itemFlow
 
     override fun observeDueCount(nowMillis: Long): Flow<Int> = dueItems.map { items ->
@@ -116,6 +108,27 @@ class FakeSavedItemRepository(
     val appliedTags = mutableMapOf<String, List<String>>()
     val allTags = MutableStateFlow<List<String>>(emptyList())
     val itemTags = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+
+    var lastArchiveQuery: ArchiveQuery? = null
+
+    data class ArchiveQuery(
+        val rawQuery: String,
+        val statuses: Set<ItemStatus>?,
+        val domain: String?,
+        val tag: String?,
+        val sort: ArchiveSort,
+    )
+
+    override fun observeArchive(
+        query: String,
+        statuses: Set<ItemStatus>?,
+        domain: String?,
+        tag: String?,
+        sort: ArchiveSort,
+    ): Flow<List<SavedItem>> {
+        lastArchiveQuery = ArchiveQuery(query, statuses, domain, tag, sort)
+        return flowOf(emptyList())
+    }
 
     override suspend fun applyTags(itemId: String, tags: List<String>) {
         appliedTags[itemId] = tags

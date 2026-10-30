@@ -18,6 +18,7 @@ class AfterLaterApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        container.crashReportStore.installAsHandler()
         container.applicationScope.launch {
             try {
                 container.reminderScheduler.ensureScheduled(

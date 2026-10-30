@@ -8,7 +8,7 @@ AFTERLATER is a local-first Android link archive. Save a link from any app, let 
 
 - **Save from anywhere.** Use the Android share sheet, paste a link in the app, or (experimentally) get a card when TikTok exposes a video link in its share sheet, or when you copy a link in any app.
 - **Decide now, or later.** When the card saves a link you can say whether it should surface today and whether it expires at the end of today or the week. An expiring entry jumps the daily batch so it cannot die unseen.
-- **A small daily batch.** Up to three due entries per day, picked with domain diversity. Opening one resets it for a week; snooze pushes it to tomorrow or next week.
+- **A small daily batch.** Up to five due entries per day (you choose, three by default), picked with domain diversity. Opening one resets it for a week; snooze pushes it to tomorrow, next week, or a date you pick.
 - **A searchable archive.** Full-text search across titles, notes, domains, and URLs, with filters for the undecided pool (in rotation), kept links (useful), and archived entries.
 - **Local only.** Everything is stored on the device in Room. The only network use is an optional, best-effort metadata preview for saved pages. Export and restore use a readable local JSON file.
 - **Optional reminders.** One quiet notification a day when something is due. Off by default.

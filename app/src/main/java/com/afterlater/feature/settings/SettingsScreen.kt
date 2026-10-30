@@ -91,6 +91,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
     val restoring by viewModel.restoring.collectAsStateWithLifecycle()
     val pendingRestore by viewModel.pendingRestore.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val crashSummary by viewModel.crashSummary.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val colors = LocalAfterLaterColors.current
     val context = LocalContext.current
@@ -163,6 +164,18 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         if (current != null) {
             snackbarHostState.showSnackbar(current)
             viewModel.clearMessage()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.shareEvents.collect { text ->
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "AFTERLATER debug info")
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            runCatching { context.startActivity(Intent.createChooser(send, null)) }
+                .onFailure { viewModel.showMessage("No app could open the share sheet.") }
         }
     }
 
@@ -260,7 +273,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     SectionMark(index = "02", title = "REDISCOVERY RHYTHM")
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Each day surfaces up to three due entries. Opening one resets it for seven days; snoozing offers tomorrow or next week.",
+                        "Each day surfaces as many due entries as your daily limit. Opening one resets it for seven days; snoozing offers tomorrow, next week, or a date you pick.",
                         AfterType.BodySmall,
                         colors.textSecondary,
                     )
@@ -701,6 +714,36 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     LabeledValue("Storage", "ON DEVICE / ROOM + DATASTORE")
                     LabeledValue("Network", "PREVIEWS ONLY / OPTIONAL")
                     LabeledValue("Account", "NONE")
+                    if ((crashSummary?.count ?: 0) > 0) {
+                        LabeledValue(
+                            "Last crash",
+                            crashSummary?.latestAtMillis
+                                ?.let { TimeFormat.dateTime(Instant.ofEpochMilli(it)) }
+                                ?: "UNKNOWN",
+                        )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextAction(
+                            label = "Share debug info",
+                            onClick = viewModel::shareDebugInfo,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if ((crashSummary?.count ?: 0) > 0) {
+                            TextAction(
+                                label = "Clear crash log",
+                                onClick = viewModel::clearCrashReports,
+                                color = colors.textSecondary,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Local only: app version, device, and recent crash traces. Nothing is sent until you pick a destination — and redact private links before posting anywhere public.",
+                        AfterType.MonoSmall,
+                        colors.textDim,
+                    )
 
                     Spacer(Modifier.height(26.dp))
                     Text(

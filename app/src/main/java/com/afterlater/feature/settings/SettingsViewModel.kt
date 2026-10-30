@@ -6,14 +6,18 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.afterlater.AfterLaterApplication
 import com.afterlater.core.model.AppSettings
 import com.afterlater.core.model.AppTheme
 import com.afterlater.data.export.ArchiveBackupService
+import com.afterlater.data.export.AutoBackupManager
 import com.afterlater.data.export.BackupInspection
 import com.afterlater.data.export.RestoreOutcome
 import com.afterlater.data.export.RestorePreview
 import com.afterlater.data.reminder.ReminderScheduler
+import com.afterlater.data.repository.AutoBackupState
 import com.afterlater.data.repository.SavedItemRepository
 import com.afterlater.data.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
@@ -28,6 +32,7 @@ import kotlinx.coroutines.launch
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
     val totalItems: Int = 0,
+    val autoBackup: AutoBackupState = AutoBackupState(),
 )
 
 class SettingsViewModel(
@@ -35,13 +40,15 @@ class SettingsViewModel(
     repository: SavedItemRepository,
     private val backupService: ArchiveBackupService,
     private val reminderScheduler: ReminderScheduler,
+    private val autoBackupManager: AutoBackupManager,
 ) : ViewModel() {
 
     val uiState: StateFlow<SettingsUiState> = combine(
         settingsRepository.settings,
         repository.observeTotalCount(),
-    ) { settings, total ->
-        SettingsUiState(settings = settings, totalItems = total)
+        settingsRepository.autoBackup,
+    ) { settings, total, autoBackup ->
+        SettingsUiState(settings = settings, totalItems = total, autoBackup = autoBackup)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     private val _exporting = MutableStateFlow(false)
@@ -106,6 +113,49 @@ class SettingsViewModel(
     fun setClipboardCaptureEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setClipboardCaptureEnabled(enabled)
+        }
+    }
+
+    fun chooseAutoBackupFolder(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val folderName = withContext(Dispatchers.IO) {
+                    if (!autoBackupManager.handleSelection(uri)) {
+                        null
+                    } else {
+                        autoBackupManager.folderDisplayName(uri) ?: "Chosen folder"
+                    }
+                }
+                if (folderName == null) {
+                    _message.value = "The folder permission was not granted. Try again."
+                    return@launch
+                }
+                settingsRepository.chooseAutoBackupFolder(uri.toString(), folderName)
+                autoBackupManager.schedule()
+                _message.value = "Automatic backup is on for \"$folderName\"."
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _message.value = "The folder could not be used for backups."
+            }
+        }
+    }
+
+    fun setAutoBackupEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                val state = settingsRepository.autoBackupState()
+                if (enabled && state.dirUri == null) {
+                    _message.value = "Choose a folder for the backup first."
+                    return@launch
+                }
+                settingsRepository.setAutoBackupEnabled(enabled)
+                if (enabled) autoBackupManager.schedule() else autoBackupManager.cancel()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _message.value = "The automatic backup setting could not be saved."
+            }
         }
     }
 
@@ -223,6 +273,7 @@ class SettingsViewModel(
                     repository = app.container.savedItemRepository,
                     backupService = app.container.archiveBackupManager,
                     reminderScheduler = app.container.reminderScheduler,
+                    autoBackupManager = app.container.autoBackupManager,
                 )
             }
         }

@@ -79,6 +79,7 @@ import com.afterlater.core.model.AppTheme
 import com.afterlater.core.util.TimeFormat
 import com.afterlater.data.export.RestorePreview
 import com.afterlater.data.reminder.areReminderNotificationsAllowed
+import java.time.Instant
 import java.time.LocalDate
 import java.util.Locale
 
@@ -130,6 +131,11 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) viewModel.inspectBackup(uri)
+    }
+    val backupFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) viewModel.chooseAutoBackupFolder(uri)
     }
     val exportName = remember { "afterlater-archive-${LocalDate.now()}.json" }
     val onRemindersToggle: (Boolean) -> Unit = { enabled ->
@@ -605,6 +611,82 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "Uses the system file picker. You will see exactly what will be added before anything is restored. Existing entries are never overwritten or deleted.",
+                        AfterType.MonoSmall,
+                        colors.textDim,
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+                    Hairline()
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = state.autoBackup.enabled,
+                                role = Role.Switch,
+                                onValueChange = viewModel::setAutoBackupEnabled,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Mono("AUTOMATIC BACKUP", color = colors.textPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                if (state.autoBackup.enabled) {
+                                    "A copy is written to the chosen folder once a week."
+                                } else {
+                                    "Off. The archive is only saved when you export it yourself."
+                                },
+                                AfterType.BodySmall,
+                                colors.textSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = state.autoBackup.enabled,
+                            onCheckedChange = null,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = colors.accentInk,
+                                checkedTrackColor = colors.accent,
+                                checkedBorderColor = colors.accent,
+                                uncheckedThumbColor = colors.textSecondary,
+                                uncheckedTrackColor = colors.surface,
+                                uncheckedBorderColor = colors.borderStrong,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Mono("FOLDER", color = colors.textDim)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                state.autoBackup.folderName ?: "NOT CHOSEN",
+                                AfterType.MonoSmall,
+                                if (state.autoBackup.folderName == null) colors.textDim else colors.textPrimary,
+                                maxLines = 1,
+                            )
+                        }
+                        TextAction(
+                            label = if (state.autoBackup.folderName == null) "Choose folder" else "Change",
+                            onClick = { backupFolderLauncher.launch(null) },
+                        )
+                    }
+                    val lastBackupAt = state.autoBackup.lastBackupAtMillis
+                    if (lastBackupAt != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Mono(
+                            "LAST BACKUP / " + TimeFormat.dateTime(Instant.ofEpochMilli(lastBackupAt)),
+                            color = colors.accent,
+                            style = AfterType.MonoSmall,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Writes afterlater-archive-auto.json to the chosen folder once a week, overwriting the previous copy. Nothing is uploaded; if the folder is on a synced drive, that is between you and the drive.",
                         AfterType.MonoSmall,
                         colors.textDim,
                     )

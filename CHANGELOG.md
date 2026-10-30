@@ -4,6 +4,10 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Automatic local backup: pick a folder once (system picker) and AFTERLATER
+  overwrites afterlater-archive-auto.json there weekly, so a lost phone no
+  longer means a lost archive. Nothing is uploaded; restoring still happens
+  through the existing Restore button.
 - Tags are now usable everywhere: the entry page shows an entry's tags with an
   **Edit tags** dialog (preset labels plus every tag in the archive), and the
   archive gains a **TAG** filter once any entry carries a tag.

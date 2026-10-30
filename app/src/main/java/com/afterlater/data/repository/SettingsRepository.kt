@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.afterlater.core.model.AppSettings
@@ -18,7 +19,29 @@ import java.io.IOException
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "afterlater_settings")
 
+/** Local automatic-backup configuration, stored alongside the other preferences. */
+data class AutoBackupState(
+    val enabled: Boolean = false,
+    val dirUri: String? = null,
+    val folderName: String? = null,
+    val lastBackupAtMillis: Long? = null,
+)
+
 class SettingsRepository(private val context: Context) {
+
+    val autoBackup: Flow<AutoBackupState> = context.settingsDataStore.data
+        .catch { error ->
+            if (error is IOException) emit(androidx.datastore.preferences.core.emptyPreferences())
+            else throw error
+        }
+        .map { prefs ->
+            AutoBackupState(
+                enabled = prefs[AUTO_BACKUP_ENABLED] ?: false,
+                dirUri = prefs[AUTO_BACKUP_DIR],
+                folderName = prefs[AUTO_BACKUP_FOLDER_NAME],
+                lastBackupAtMillis = prefs[LAST_AUTO_BACKUP_AT],
+            )
+        }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data
         .catch { error ->
@@ -71,6 +94,25 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { prefs -> prefs[CLIPBOARD_CAPTURE_ENABLED] = enabled }
     }
 
+    suspend fun autoBackupState(): AutoBackupState = autoBackup.first()
+
+    /** Picks a folder and switches automatic backup on in one atomic write. */
+    suspend fun chooseAutoBackupFolder(dirUri: String, folderName: String) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[AUTO_BACKUP_DIR] = dirUri
+            prefs[AUTO_BACKUP_FOLDER_NAME] = folderName
+            prefs[AUTO_BACKUP_ENABLED] = true
+        }
+    }
+
+    suspend fun setAutoBackupEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { prefs -> prefs[AUTO_BACKUP_ENABLED] = enabled }
+    }
+
+    suspend fun setLastAutoBackupAt(millis: Long) {
+        context.settingsDataStore.edit { prefs -> prefs[LAST_AUTO_BACKUP_AT] = millis }
+    }
+
     suspend fun lastReminderNotifiedOn(): String? =
         context.settingsDataStore.data.first()[LAST_REMINDER_NOTIFIED_ON]
 
@@ -89,5 +131,9 @@ class SettingsRepository(private val context: Context) {
         val TIKTOK_AUTO_DETECT_ENABLED = booleanPreferencesKey("tiktok_auto_detect_enabled")
         val CLIPBOARD_CAPTURE_ENABLED = booleanPreferencesKey("clipboard_capture_enabled")
         val LAST_REMINDER_NOTIFIED_ON = stringPreferencesKey("last_reminder_notified_on")
+        val AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
+        val AUTO_BACKUP_DIR = stringPreferencesKey("auto_backup_dir")
+        val AUTO_BACKUP_FOLDER_NAME = stringPreferencesKey("auto_backup_folder_name")
+        val LAST_AUTO_BACKUP_AT = longPreferencesKey("last_auto_backup_at")
     }
 }

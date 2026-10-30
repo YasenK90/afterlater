@@ -28,6 +28,11 @@ class AfterLaterApplication : Application(), ImageLoaderFactory {
             } catch (error: Exception) {
                 Log.w("AFTERLATER", "Reminder schedule check failed", error)
             }
+            try {
+                container.autoBackupManager.syncSchedule()
+            } catch (error: Exception) {
+                Log.w("AFTERLATER", "Auto-backup schedule check failed", error)
+            }
         }
     }
 

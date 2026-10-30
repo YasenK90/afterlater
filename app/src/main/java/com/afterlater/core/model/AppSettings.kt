@@ -9,6 +9,7 @@ data class AppSettings(
     val reminderMinute: Int = DEFAULT_REMINDER_MINUTE,
     val tiktokAutoDetectEnabled: Boolean = false,
     val clipboardCaptureEnabled: Boolean = false,
+    val onboardingDone: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_DAILY_LIMIT = 3

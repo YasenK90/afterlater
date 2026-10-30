@@ -4,6 +4,9 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- First-run welcome: a one-time screen that explains the archive in three
+  lines and walks through turning on copy detection, including the
+  accessibility and overlay permissions it needs.
 - Automatic local backup: pick a folder once (system picker) and AFTERLATER
   overwrites afterlater-archive-auto.json there weekly, so a lost phone no
   longer means a lost archive. Nothing is uploaded; restoring still happens

@@ -62,6 +62,7 @@ class SettingsRepository(private val context: Context) {
                     .coerceIn(0, 59),
                 tiktokAutoDetectEnabled = prefs[TIKTOK_AUTO_DETECT_ENABLED] ?: false,
                 clipboardCaptureEnabled = prefs[CLIPBOARD_CAPTURE_ENABLED] ?: false,
+                onboardingDone = prefs[ONBOARDING_DONE] ?: false,
             )
         }
 
@@ -113,6 +114,10 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { prefs -> prefs[LAST_AUTO_BACKUP_AT] = millis }
     }
 
+    suspend fun completeOnboarding() {
+        context.settingsDataStore.edit { prefs -> prefs[ONBOARDING_DONE] = true }
+    }
+
     suspend fun lastReminderNotifiedOn(): String? =
         context.settingsDataStore.data.first()[LAST_REMINDER_NOTIFIED_ON]
 
@@ -135,5 +140,6 @@ class SettingsRepository(private val context: Context) {
         val AUTO_BACKUP_DIR = stringPreferencesKey("auto_backup_dir")
         val AUTO_BACKUP_FOLDER_NAME = stringPreferencesKey("auto_backup_folder_name")
         val LAST_AUTO_BACKUP_AT = longPreferencesKey("last_auto_backup_at")
+        val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
     }
 }

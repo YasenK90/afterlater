@@ -27,6 +27,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +53,7 @@ import com.afterlater.core.designsystem.Hairline
 import com.afterlater.core.designsystem.LocalAfterLaterColors
 import com.afterlater.core.designsystem.Text
 import com.afterlater.core.model.AppSettings
+import com.afterlater.core.model.AppTheme
 import com.afterlater.feature.archive.ArchiveScreen
 import com.afterlater.feature.archive.ArchiveViewModel
 import com.afterlater.feature.capture.QuickAddScreen
@@ -62,6 +64,8 @@ import com.afterlater.feature.itemdetail.ItemDetailScreen
 import com.afterlater.feature.itemdetail.ItemDetailViewModel
 import com.afterlater.feature.today.TodayScreen
 import com.afterlater.feature.today.TodayViewModel
+import com.afterlater.feature.welcome.WelcomeScreen
+import kotlinx.coroutines.launch
 
 private const val ROUTE_TODAY = "today"
 private const val ROUTE_ARCHIVE = "archive"
@@ -75,11 +79,37 @@ private val topLevelRoutes = setOf(ROUTE_TODAY, ROUTE_ARCHIVE, ROUTE_SETTINGS)
 fun AfterLaterRoot(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as AfterLaterApplication
+    // Null until DataStore's first value arrives, so the welcome screen never
+    // flashes over an already-onboarded install.
     val settings by app.container.settingsRepository.settings
-        .collectAsStateWithLifecycle(initialValue = AppSettings())
+        .collectAsStateWithLifecycle<AppSettings?>(initialValue = null)
+    val scope = rememberCoroutineScope()
 
-    AfterLaterTheme(theme = settings.theme) {
-        content()
+    AfterLaterTheme(theme = settings?.theme ?: AppTheme.INK) {
+        val current = settings
+        when {
+            current == null -> Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(LocalAfterLaterColors.current.background),
+            )
+
+            current.onboardingDone -> content()
+
+            else -> WelcomeScreen(
+                clipboardCaptureEnabled = current.clipboardCaptureEnabled,
+                onSetClipboardCapture = { enabled ->
+                    scope.launch {
+                        runCatching { app.container.settingsRepository.setClipboardCaptureEnabled(enabled) }
+                    }
+                },
+                onDone = {
+                    scope.launch {
+                        runCatching { app.container.settingsRepository.completeOnboarding() }
+                    }
+                },
+            )
+        }
     }
 }
 

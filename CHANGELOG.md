@@ -4,6 +4,8 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+## 1.2 — 2026-10
+
 - Compose UI tests now run on the JVM (Robolectric): the snooze dialog's
   presets and date picker, the tag editor's toggling and confirm order, and
   the archive's status pills are exercised as real UI — the suite grew from

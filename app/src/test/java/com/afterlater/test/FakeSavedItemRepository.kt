@@ -51,6 +51,7 @@ class FakeSavedItemRepository(
         query: String,
         statuses: Set<ItemStatus>?,
         domain: String?,
+        tag: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> = flowOf(emptyList())
 
@@ -113,10 +114,19 @@ class FakeSavedItemRepository(
     }
 
     val appliedTags = mutableMapOf<String, List<String>>()
+    val allTags = MutableStateFlow<List<String>>(emptyList())
+    val itemTags = MutableStateFlow<Map<String, List<String>>>(emptyMap())
 
     override suspend fun applyTags(itemId: String, tags: List<String>) {
         appliedTags[itemId] = tags
+        itemTags.value = itemTags.value + (itemId to tags)
+        allTags.value = (allTags.value + tags).distinct().sorted()
     }
+
+    override fun observeTags(): Flow<List<String>> = allTags
+
+    override fun observeTagsForItem(itemId: String): Flow<List<String>> =
+        itemTags.map { it[itemId].orEmpty() }
 
     override suspend fun updateNote(id: String, note: String?): SavedItem? {
         updateNoteHandler?.let { return it(id, note) }

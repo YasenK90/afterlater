@@ -83,10 +83,15 @@ class ArchiveViewModelTest {
             assertEquals("saved note", repository.lastQuery)
             assertEquals(ArchiveSort.NEWEST, repository.lastSort)
 
+            viewModel.setTag("Recipe")
+            advanceUntilIdle()
+            assertEquals("Recipe", repository.lastTag)
+
             viewModel.clearFilters()
             advanceUntilIdle()
             assertNull(repository.lastStatuses)
             assertNull(repository.lastDomain)
+            assertNull(repository.lastTag)
             assertEquals("", repository.lastQuery)
         }
 
@@ -153,6 +158,7 @@ private class FakeArchiveRepository : SavedItemRepository {
     var lastQuery: String? = null
     var lastStatuses: Set<ItemStatus>? = null
     var lastDomain: String? = null
+    var lastTag: String? = null
     var lastSort: ArchiveSort? = null
 
     var restoreCalls = 0
@@ -166,14 +172,20 @@ private class FakeArchiveRepository : SavedItemRepository {
         query: String,
         statuses: Set<ItemStatus>?,
         domain: String?,
+        tag: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> {
         lastQuery = query
         lastStatuses = statuses
         lastDomain = domain
+        lastTag = tag
         lastSort = sort
         return flowOf(listOf(savedItem(status = statuses?.singleOrNull() ?: ItemStatus.ARCHIVED)))
     }
+
+    override fun observeTags(): Flow<List<String>> = flowOf(listOf("Recipe", "Useful"))
+
+    override fun observeTagsForItem(itemId: String): Flow<List<String>> = flowOf(emptyList())
 
     override fun observeDomains(): Flow<List<String>> = flowOf(listOf("example.com"))
 

@@ -40,6 +40,10 @@ interface SavedItemDao {
             OR canonicalUrl LIKE '%' || :query || '%' ESCAPE '\')
         AND status IN (:statuses)
         AND (:domain IS NULL OR domain = :domain)
+        AND (:tag IS NULL OR EXISTS (
+            SELECT 1 FROM saved_item_tags st
+            WHERE st.itemId = saved_items.id AND st.tagName = :tag
+        ))
         ORDER BY
             CASE WHEN :sort = 'NEWEST' THEN savedAt END DESC,
             CASE WHEN :sort = 'OLDEST' THEN savedAt END ASC,
@@ -51,6 +55,7 @@ interface SavedItemDao {
         query: String,
         statuses: List<String>,
         domain: String?,
+        tag: String?,
         sort: String,
     ): Flow<List<SavedItemEntity>>
 
@@ -142,6 +147,9 @@ interface TagDao {
 
     @Query("SELECT tagName FROM saved_item_tags WHERE itemId = :itemId ORDER BY tagName ASC")
     suspend fun tagsForItem(itemId: String): List<String>
+
+    @Query("SELECT tagName FROM saved_item_tags WHERE itemId = :itemId ORDER BY tagName ASC")
+    fun observeTagsForItem(itemId: String): Flow<List<String>>
 
     @Query("SELECT * FROM tags ORDER BY createdAt ASC")
     fun observeAll(): Flow<List<TagEntity>>

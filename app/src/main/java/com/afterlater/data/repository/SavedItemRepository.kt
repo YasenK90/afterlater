@@ -22,6 +22,7 @@ interface SavedItemRepository {
         query: String,
         statuses: Set<ItemStatus>?,
         domain: String?,
+        tag: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>>
     fun observeItem(id: String): Flow<SavedItem?>
@@ -29,6 +30,8 @@ interface SavedItemRepository {
     fun observeDueCandidates(nowMillis: Long, limit: Int): Flow<List<SavedItem>>
     fun observeTotalCount(): Flow<Int>
     fun observeDomains(): Flow<List<String>>
+    fun observeTags(): Flow<List<String>>
+    fun observeTagsForItem(itemId: String): Flow<List<String>>
 
     suspend fun getItem(id: String): SavedItem?
     suspend fun findDueCandidates(nowMillis: Long, limit: Int): List<SavedItem>

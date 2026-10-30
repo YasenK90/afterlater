@@ -55,11 +55,13 @@ class RoomSavedItemRepository(
         query: String,
         statuses: Set<ItemStatus>?,
         domain: String?,
+        tag: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> = items.observeArchive(
         query = ArchiveSearch.escapeLikePattern(query.trim()),
         statuses = (statuses ?: ItemStatus.entries.toSet()).map { it.name },
         domain = domain,
+        tag = tag?.trim()?.takeIf { it.isNotEmpty() },
         sort = sort.name,
     ).map { rows -> rows.map { it.toModel() } }
 
@@ -74,6 +76,12 @@ class RoomSavedItemRepository(
     override fun observeTotalCount(): Flow<Int> = items.observeTotalCount()
 
     override fun observeDomains(): Flow<List<String>> = items.observeDomains()
+
+    override fun observeTags(): Flow<List<String>> = tags.observeAll().map { rows ->
+        rows.map { it.name }
+    }
+
+    override fun observeTagsForItem(itemId: String): Flow<List<String>> = tags.observeTagsForItem(itemId)
 
     override suspend fun getItem(id: String): SavedItem? = items.getById(id)?.toModel()
 

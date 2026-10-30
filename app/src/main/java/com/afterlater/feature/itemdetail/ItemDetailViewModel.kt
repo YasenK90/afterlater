@@ -16,8 +16,10 @@ import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.SnoozeWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -41,6 +43,13 @@ class ItemDetailViewModel(
     val uiState: StateFlow<ItemDetailUiState> = _uiState.asStateFlow()
     private var actionInFlight = false
     private var noteSaveCallback: (() -> Unit)? = null
+
+    val tags: StateFlow<List<String>> = repository.observeTagsForItem(itemId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Every tag known to the archive, offered in the editor alongside the presets. */
+    val knownTags: StateFlow<List<String>> = repository.observeTags()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -178,6 +187,19 @@ class ItemDetailViewModel(
                 else -> "DEADLINE SET."
             },
         )
+    }
+
+    fun applyTags(tags: List<String>) {
+        if (tags.isEmpty() && this.tags.value.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                repository.applyTags(itemId, tags)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // applyTags already logs; the tag flow simply keeps its old value.
+            }
+        }
     }
 
     fun undo(undo: ReviewUndo) = runAction("Could not undo that action.") {

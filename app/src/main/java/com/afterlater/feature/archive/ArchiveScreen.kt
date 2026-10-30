@@ -97,10 +97,12 @@ fun ArchiveScreen(
     val query by viewModel.query.collectAsStateWithLifecycle()
     val statusFilter by viewModel.statusFilter.collectAsStateWithLifecycle()
     val domainFilter by viewModel.domainFilter.collectAsStateWithLifecycle()
+    val tagFilter by viewModel.tagFilter.collectAsStateWithLifecycle()
     val sort by viewModel.sort.collectAsStateWithLifecycle()
     val layout by viewModel.layout.collectAsStateWithLifecycle()
     val entries by viewModel.items.collectAsStateWithLifecycle()
     val domains by viewModel.domains.collectAsStateWithLifecycle()
+    val tags by viewModel.tags.collectAsStateWithLifecycle()
     val totalCount by viewModel.totalCount.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
@@ -110,8 +112,12 @@ fun ArchiveScreen(
     val now = remember { Instant.now() }
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<SavedItem?>(null) }
-    val hasFilters = query.isNotBlank() || statusFilter != ArchiveStatusFilter.ALL || domainFilter != null
+    val hasFilters = query.isNotBlank() ||
+        statusFilter != ArchiveStatusFilter.ALL ||
+        domainFilter != null ||
+        tagFilter != null
     val domainValue = domainFilter ?: "ALL"
+    val tagValue = tagFilter ?: "ALL"
 
     LaunchedEffect(message) {
         message?.let {
@@ -231,6 +237,18 @@ fun ArchiveScreen(
                     onSelect = { viewModel.setSort(ArchiveSort.valueOf(it)) },
                     modifier = Modifier.weight(1f),
                     selectedId = sort.name,
+                )
+            }
+            if (tags.isNotEmpty() || tagFilter != null) {
+                Selector(
+                    caption = "TAG",
+                    value = tagValue,
+                    options = listOf("ALL" to "ALL TAGS") + tags.map { it to it },
+                    onSelect = { viewModel.setTag(if (it == "ALL") null else it) },
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                        .fillMaxWidth(),
+                    selectedId = tagValue,
                 )
             }
             Hairline()

@@ -4,6 +4,9 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Tags are now usable everywhere: the entry page shows an entry's tags with an
+  **Edit tags** dialog (preset labels plus every tag in the archive), and the
+  archive gains a **TAG** filter once any entry carries a tag.
 - Clipboard card: a third optional question, **TAG IT?**, offers preset labels
   (useful, offer ending today, watch later, recipe, buy it) after SURFACE and
   EXPIRES. Tags are stored locally, are optional, and the card still closes on

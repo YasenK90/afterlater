@@ -176,6 +176,7 @@ private class FakeShareRepository : SavedItemRepository {
         query: String,
         statuses: Set<ItemStatus>?,
         domain: String?,
+        tag: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> = flowOf(emptyList())
 
@@ -212,6 +213,10 @@ private class FakeShareRepository : SavedItemRepository {
     override suspend fun setDeadline(id: String, choice: ExpiryChoice): SavedItem? = error("not used")
 
     override suspend fun applyTags(itemId: String, tags: List<String>) = Unit
+
+    override fun observeTags(): Flow<List<String>> = flowOf(emptyList())
+
+    override fun observeTagsForItem(itemId: String): Flow<List<String>> = flowOf(emptyList())
 
     override suspend fun updateNote(id: String, note: String?): SavedItem? = error("not used")
 

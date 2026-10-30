@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -37,13 +40,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.afterlater.R
 import com.afterlater.core.designsystem.AfterButton
 import com.afterlater.core.designsystem.AfterButtonStyle
 import com.afterlater.core.designsystem.AfterIcons
@@ -72,6 +79,7 @@ import com.afterlater.core.util.LinkOpener
 import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.core.util.TimeFormat
 import java.time.Instant
+import java.util.Locale
 
 @Composable
 fun ItemDetailScreen(
@@ -79,6 +87,8 @@ fun ItemDetailScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val tags by viewModel.tags.collectAsStateWithLifecycle()
+    val knownTags by viewModel.knownTags.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val haptics = rememberHaptics()
@@ -87,6 +97,7 @@ fun ItemDetailScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showSnoozeDialog by remember { mutableStateOf(false) }
     var showDeadlineDialog by remember { mutableStateOf(false) }
+    var showTagsDialog by remember { mutableStateOf(false) }
 
     val leaf: () -> Unit = {
         if (state.noteDirty) {
@@ -130,6 +141,7 @@ fun ItemDetailScreen(
                         item = item,
                         state = state,
                         now = now,
+                        tags = tags,
                         modifier = Modifier.weight(1f),
                         onOpenLink = {
                             if (LinkOpener.open(context, item.originalUrl)) {
@@ -159,6 +171,7 @@ fun ItemDetailScreen(
                         onDeadline = viewModel::setDeadline,
                         onNoteChange = viewModel::onNoteChange,
                         onSaveNote = { viewModel.saveNote() },
+                        onEditTags = { showTagsDialog = true },
                         onDelete = { showDeleteDialog = true },
                     )
                 }
@@ -212,6 +225,29 @@ fun ItemDetailScreen(
             },
         )
     }
+
+    if (showTagsDialog) {
+        val presets = listOf(
+            R.string.tag_useful,
+            R.string.tag_offer_ending_today,
+            R.string.tag_watch_later,
+            R.string.tag_recipe,
+            R.string.tag_buy_it,
+        ).map { stringResource(it) }
+        val available = presets + (knownTags + tags)
+            .filter { it !in presets }
+            .distinct()
+            .sorted()
+        TagEditDialog(
+            available = available,
+            selected = tags.toSet(),
+            onDismiss = { showTagsDialog = false },
+            onConfirm = { picked ->
+                showTagsDialog = false
+                viewModel.applyTags(picked)
+            },
+        )
+    }
 }
 
 @Composable
@@ -242,11 +278,13 @@ private fun DetailTopBar(status: ItemStatus?, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailBody(
     item: SavedItem,
     state: ItemDetailUiState,
     now: Instant,
+    tags: List<String>,
     modifier: Modifier = Modifier,
     onOpenLink: () -> Unit,
     onUseful: () -> Unit,
@@ -258,6 +296,7 @@ private fun DetailBody(
     onDeadline: (ExpiryChoice) -> Unit,
     onNoteChange: (String) -> Unit,
     onSaveNote: () -> Unit,
+    onEditTags: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = LocalAfterLaterColors.current
@@ -484,7 +523,30 @@ private fun DetailBody(
             Spacer(Modifier.height(16.dp))
             Hairline()
             Spacer(Modifier.height(16.dp))
-            SectionMark(index = "03", title = "ORIGINAL")
+            SectionMark(index = "03", title = "TAGS")
+            Spacer(Modifier.height(10.dp))
+            if (tags.isEmpty()) {
+                Mono("UNTAGGED", color = colors.textDim, style = AfterType.MonoSmall)
+                Spacer(Modifier.height(10.dp))
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    tags.forEach { name -> TagLabel(name) }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            TextAction(
+                label = "Edit tags",
+                onClick = onEditTags,
+                color = colors.accent,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Hairline()
+            Spacer(Modifier.height(16.dp))
+            SectionMark(index = "04", title = "ORIGINAL")
             Spacer(Modifier.height(10.dp))
             Text(
                 text = item.originalUrl,
@@ -582,6 +644,95 @@ private fun DeleteEntryDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                 label = "Delete forever",
                 onClick = onConfirm,
                 color = colors.danger,
+            )
+        },
+        dismissButton = {
+            TextAction(
+                label = "Cancel",
+                onClick = onDismiss,
+                color = colors.textSecondary,
+            )
+        },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagLabel(name: String) {
+    val colors = LocalAfterLaterColors.current
+    Box(
+        modifier = Modifier
+            .border(1.dp, colors.border, RoundedCornerShape(1.dp))
+            .background(colors.surface)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = name.uppercase(Locale.US),
+            style = AfterType.MonoSmall,
+            color = colors.textSecondary,
+            maxLines = 1,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagEditDialog(
+    available: List<String>,
+    selected: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    val colors = LocalAfterLaterColors.current
+    var picked by remember { mutableStateOf(selected) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+        shape = RoundedCornerShape(2.dp),
+        tonalElevation = 0.dp,
+        title = {
+            Text("TAG THIS ENTRY?", AfterType.DisplaySmall, colors.textPrimary)
+        },
+        text = {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                available.forEach { name ->
+                    val on = name in picked
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(if (on) colors.accent else Color.Transparent)
+                            .border(
+                                1.dp,
+                                if (on) colors.accent else colors.border,
+                                RoundedCornerShape(1.dp),
+                            )
+                            .toggleable(
+                                value = on,
+                                role = Role.Checkbox,
+                                onValueChange = { checked ->
+                                    picked = if (checked) picked + name else picked - name
+                                },
+                            )
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = name.uppercase(Locale.US),
+                            style = AfterType.MonoSmall,
+                            color = if (on) colors.accentInk else colors.textSecondary,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextAction(
+                label = "Save tags",
+                onClick = { onConfirm(available.filter { it in picked }) },
             )
         },
         dismissButton = {

@@ -42,6 +42,7 @@ private data class ArchiveRequest(
     val query: String,
     val statuses: Set<ItemStatus>?,
     val domain: String?,
+    val tag: String?,
     val sort: ArchiveSort,
 )
 
@@ -58,6 +59,9 @@ class ArchiveViewModel(
 
     private val _domainFilter = MutableStateFlow<String?>(null)
     val domainFilter: StateFlow<String?> = _domainFilter.asStateFlow()
+
+    private val _tagFilter = MutableStateFlow<String?>(null)
+    val tagFilter: StateFlow<String?> = _tagFilter.asStateFlow()
 
     private val _sort = MutableStateFlow(ArchiveSort.NEWEST)
     val sort: StateFlow<ArchiveSort> = _sort.asStateFlow()
@@ -77,9 +81,10 @@ class ArchiveViewModel(
         _query.debounce(180),
         _statusFilter,
         _domainFilter,
+        _tagFilter,
         _sort,
-    ) { query, status, domain, sort ->
-        ArchiveRequest(query.trim(), status.statuses, domain, sort)
+    ) { query, status, domain, tag, sort ->
+        ArchiveRequest(query.trim(), status.statuses, domain, tag, sort)
     }.distinctUntilChanged()
 
     val items: StateFlow<List<SavedItem>> = request
@@ -88,12 +93,16 @@ class ArchiveViewModel(
                 query = req.query,
                 statuses = req.statuses,
                 domain = req.domain,
+                tag = req.tag,
                 sort = req.sort,
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val domains: StateFlow<List<String>> = repository.observeDomains()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val tags: StateFlow<List<String>> = repository.observeTags()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val totalCount: StateFlow<Int> = repository.observeTotalCount()
@@ -109,6 +118,10 @@ class ArchiveViewModel(
 
     fun setDomain(domain: String?) {
         _domainFilter.value = domain
+    }
+
+    fun setTag(tag: String?) {
+        _tagFilter.value = tag
     }
 
     fun setSort(sort: ArchiveSort) {
@@ -157,6 +170,7 @@ class ArchiveViewModel(
         _query.value = ""
         _statusFilter.value = ArchiveStatusFilter.ALL
         _domainFilter.value = null
+        _tagFilter.value = null
     }
 
     companion object {

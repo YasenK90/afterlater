@@ -108,6 +108,8 @@ fun TodayScreen(
         }
     }
 
+    val featured = state.featured
+
     Box(Modifier.fillMaxSize()) {
         ArchiveBackground {
             LazyColumn(
@@ -206,7 +208,7 @@ fun TodayScreen(
 
                 if (state.loading) {
                     item { LoadingToday() }
-                } else if (state.featured == null) {
+                } else if (featured == null) {
                     item {
                         EmptyToday(
                             hasArchive = state.totalSaved > 0,
@@ -225,7 +227,7 @@ fun TodayScreen(
                     item { Spacer(Modifier.height(14.dp)) }
                     item {
                         FeaturedCard(
-                            item = state.featured!!,
+                            item = featured,
                             now = state.now,
                             compact = compact,
                             onOpenLink = {

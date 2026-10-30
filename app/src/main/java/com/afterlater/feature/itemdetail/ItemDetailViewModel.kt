@@ -12,6 +12,7 @@ import com.afterlater.core.model.ReviewUndo
 import com.afterlater.core.model.SavedItem
 import com.afterlater.core.util.TimeFormat
 import com.afterlater.data.repository.SavedItemRepository
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.SnoozeWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -166,6 +167,17 @@ class ItemDetailViewModel(
     fun retryMetadata() = runAction("Could not queue a preview retry.") {
         repository.retryMetadata(itemId)
         ReviewNotice("Preview queued.")
+    }
+
+    fun setDeadline(choice: ExpiryChoice) = runAction("Could not set the deadline.") {
+        val updated = repository.setDeadline(itemId, choice)
+        ReviewNotice(
+            when {
+                updated == null -> "ENTRY NOT FOUND."
+                choice == ExpiryChoice.NONE -> "DEADLINE CLEARED."
+                else -> "DEADLINE SET."
+            },
+        )
     }
 
     fun undo(undo: ReviewUndo) = runAction("Could not undo that action.") {

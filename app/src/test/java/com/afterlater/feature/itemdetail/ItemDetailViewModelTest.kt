@@ -2,14 +2,18 @@ package com.afterlater.feature.itemdetail
 
 import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.ReviewChange
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.test.FakeSavedItemRepository
 import com.afterlater.test.MainDispatcherRule
 import com.afterlater.test.savedItem
+import java.time.Instant
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -100,5 +104,36 @@ class ItemDetailViewModelTest {
             advanceUntilIdle()
 
             assertEquals("ENTRY NOT FOUND.", viewModel.uiState.value.message?.text)
+        }
+
+    @Test
+    fun `clearing a deadline removes it and confirms`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val item = savedItem().copy(expiresAt = Instant.parse("2026-03-11T00:00:00Z"))
+            val repository = FakeSavedItemRepository(item)
+            val viewModel = ItemDetailViewModel(item.id, repository)
+            advanceUntilIdle()
+
+            viewModel.setDeadline(ExpiryChoice.NONE)
+            advanceUntilIdle()
+
+            assertNull(repository.itemFlow.value?.expiresAt)
+            assertEquals("DEADLINE CLEARED.", viewModel.uiState.value.message?.text)
+        }
+
+    @Test
+    fun `setting a deadline stores one and confirms`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val item = savedItem()
+            val repository = FakeSavedItemRepository(item)
+            val viewModel = ItemDetailViewModel(item.id, repository)
+            advanceUntilIdle()
+
+            viewModel.setDeadline(ExpiryChoice.TODAY)
+            advanceUntilIdle()
+
+            assertEquals(ExpiryChoice.TODAY, repository.lastDeadlineChoice)
+            assertNotNull(repository.itemFlow.value?.expiresAt)
+            assertEquals("DEADLINE SET.", viewModel.uiState.value.message?.text)
         }
 }

@@ -24,6 +24,8 @@ data class SavedItem(
     val snoozedUntil: Instant?,
     val personalNote: String?,
     val metadataStatus: MetadataStatus,
+    val surfaceHint: SurfaceHint = SurfaceHint.QUEUE,
+    val expiresAt: Instant? = null,
 ) {
     /** Stable key used to avoid showing two links from one site in a batch. */
     val domainKey: String
@@ -37,6 +39,8 @@ data class SavedItem(
         get() = status == ItemStatus.NEW ||
             status == ItemStatus.READY ||
             status == ItemStatus.SNOOZED
+
+    fun isExpired(now: Instant): Boolean = expiresAt?.let { !it.isAfter(now) } ?: false
 
     /** The review fields that an action may change, used for a precise undo. */
     fun reviewSnapshot(): ReviewSnapshot = ReviewSnapshot(
@@ -92,6 +96,17 @@ enum class ItemStatus {
     ARCHIVED,
 }
 
+enum class SurfaceHint {
+    /** The default: settle for a day, then join the daily batch. */
+    QUEUE,
+
+    /** Skip the settle delay and surface in the next batch. */
+    TODAY,
+
+    /** Never surface again; the user did not want it. */
+    MUTED,
+}
+
 enum class MetadataStatus {
     PENDING,
     SUCCESS,
@@ -125,6 +140,12 @@ data class ItemMetadata(
 data class ArchiveSnapshot(
     val items: List<SavedItem>,
     val events: List<ReviewEvent>,
+)
+
+data class RestoreWriteResult(
+    val insertedItems: Int,
+    val skippedItems: Int,
+    val insertedEvents: Int,
 )
 
 enum class ArchiveSort {

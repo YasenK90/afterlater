@@ -1,5 +1,6 @@
 package com.afterlater.core.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -7,6 +8,9 @@ import androidx.room.PrimaryKey
 import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.MetadataStatus
 import com.afterlater.core.model.ReviewAction
+import com.afterlater.core.model.ReviewEvent
+import com.afterlater.core.model.SavedItem
+import com.afterlater.core.model.SurfaceHint
 import java.time.Instant
 
 @Entity(
@@ -35,6 +39,8 @@ data class SavedItemEntity(
     val snoozedUntil: Long?,
     val personalNote: String?,
     val metadataStatus: MetadataStatus,
+    @ColumnInfo(defaultValue = "QUEUE") val surfaceHint: SurfaceHint = SurfaceHint.QUEUE,
+    val expiresAt: Long? = null,
 )
 
 @Entity(
@@ -61,6 +67,64 @@ data class ReviewEventEntity(
     val snoozeUntil: Long?,
 )
 
+@Entity(tableName = "tags")
+data class TagEntity(
+    @PrimaryKey val name: String,
+    val createdAt: Long,
+)
+
+@Entity(
+    tableName = "saved_item_tags",
+    primaryKeys = ["itemId", "tagName"],
+    foreignKeys = [
+        ForeignKey(
+            entity = SavedItemEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["itemId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = TagEntity::class,
+            parentColumns = ["name"],
+            childColumns = ["tagName"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["itemId"]), Index(value = ["tagName"])],
+)
+data class SavedItemTagEntity(
+    val itemId: String,
+    val tagName: String,
+)
+
+fun SavedItem.toEntity() = SavedItemEntity(
+    id = id,
+    originalUrl = originalUrl,
+    canonicalUrl = canonicalUrl,
+    title = title,
+    description = description,
+    domain = domain,
+    thumbnailUrl = thumbnailUrl,
+    savedAt = savedAt.toEpochMilli(),
+    updatedAt = updatedAt.toEpochMilli(),
+    status = status,
+    lastReviewedAt = lastReviewedAt?.toEpochMilli(),
+    nextReviewAt = nextReviewAt?.toEpochMilli(),
+    snoozedUntil = snoozedUntil?.toEpochMilli(),
+    personalNote = personalNote,
+    metadataStatus = metadataStatus,
+    surfaceHint = surfaceHint,
+    expiresAt = expiresAt?.toEpochMilli(),
+)
+
+fun ReviewEvent.toEntity() = ReviewEventEntity(
+    id = 0,
+    itemId = itemId,
+    action = action,
+    timestamp = timestamp.toEpochMilli(),
+    snoozeUntil = snoozeUntil?.toEpochMilli(),
+)
+
 fun SavedItemEntity.toModel() = com.afterlater.core.model.SavedItem(
     id = id,
     originalUrl = originalUrl,
@@ -77,6 +141,8 @@ fun SavedItemEntity.toModel() = com.afterlater.core.model.SavedItem(
     snoozedUntil = snoozedUntil?.let(Instant::ofEpochMilli),
     personalNote = personalNote,
     metadataStatus = metadataStatus,
+    surfaceHint = surfaceHint,
+    expiresAt = expiresAt?.let(Instant::ofEpochMilli),
 )
 
 fun ReviewEventEntity.toModel() = com.afterlater.core.model.ReviewEvent(

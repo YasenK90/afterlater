@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 object TimeFormat {
@@ -59,6 +60,21 @@ object TimeFormat {
         nextReviewAt == null -> "NOT IN ROTATION"
         nextReviewAt.isAfter(now) -> "NEXT IN ${relativeFuture(nextReviewAt, now)}"
         else -> "DUE ${relativePast(nextReviewAt, now)}"
+    }
+
+    fun expiryLabel(
+        expiresAt: Instant,
+        now: Instant,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): String {
+        if (!expiresAt.isAfter(now)) return "EXPIRED"
+        val lastDay = expiresAt.minusMillis(1).atZone(zone).toLocalDate()
+        val days = ChronoUnit.DAYS.between(now.atZone(zone).toLocalDate(), lastDay)
+        return when (days) {
+            0L -> "ENDS TONIGHT"
+            1L -> "ENDS TOMORROW"
+            else -> "ENDS IN ${days}D"
+        }
     }
 
     fun countLabel(count: Int, singular: String, plural: String): String =

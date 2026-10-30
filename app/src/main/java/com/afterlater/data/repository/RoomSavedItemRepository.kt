@@ -8,6 +8,9 @@ import com.afterlater.core.database.AfterLaterDatabase
 import com.afterlater.core.database.ArchiveSearch
 import com.afterlater.core.database.ReviewEventEntity
 import com.afterlater.core.database.SavedItemEntity
+import com.afterlater.core.database.SavedItemTagEntity
+import com.afterlater.core.database.TagEntity
+import com.afterlater.core.database.toEntity
 import com.afterlater.core.database.toModel
 import com.afterlater.core.model.ArchiveSnapshot
 import com.afterlater.core.model.ArchiveSort
@@ -19,35 +22,43 @@ import com.afterlater.core.model.NoteText
 import com.afterlater.core.model.ParsedLink
 import com.afterlater.core.model.ReviewAction
 import com.afterlater.core.model.ReviewChange
+import com.afterlater.core.model.ReviewEvent
 import com.afterlater.core.model.ReviewUndo
+import com.afterlater.core.model.RestoreWriteResult
 import com.afterlater.core.model.SavedItem
+import com.afterlater.core.model.SurfaceHint
 import com.afterlater.data.metadata.MetadataScheduler
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.ReviewScheduler
 import com.afterlater.domain.review.SnoozeWindow
+import com.afterlater.domain.review.resolve
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 class RoomSavedItemRepository(
     private val database: AfterLaterDatabase,
     private val metadataScheduler: MetadataScheduler,
     private val clock: Clock = Clock.systemUTC(),
+    private val zone: ZoneId = ZoneId.systemDefault(),
 ) : SavedItemRepository {
 
     private val items = database.savedItemDao()
     private val events = database.reviewEventDao()
+    private val tags = database.tagDao()
 
     override fun observeArchive(
         query: String,
-        status: ItemStatus?,
+        statuses: Set<ItemStatus>?,
         domain: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> = items.observeArchive(
         query = ArchiveSearch.escapeLikePattern(query.trim()),
-        status = status?.name,
+        statuses = (statuses ?: ItemStatus.entries.toSet()).map { it.name },
         domain = domain,
         sort = sort.name,
     ).map { rows -> rows.map { it.toModel() } }
@@ -163,7 +174,11 @@ class RoomSavedItemRepository(
         val current = items.getById(id) ?: return@withTransaction null
         val previous = current.toModel().reviewSnapshot()
         val now = clock.instant()
-        val until = ReviewScheduler.snoozeUntil(now, window)
+        val until = ReviewScheduler.snoozeUntil(
+            now = now,
+            window = window,
+            expiresAt = current.expiresAt?.let(Instant::ofEpochMilli),
+        )
 
         val updated = current.copy(
             status = ItemStatus.SNOOZED,
@@ -189,6 +204,30 @@ class RoomSavedItemRepository(
         action = ReviewAction.MARKED_USEFUL,
         newStatus = ItemStatus.USEFUL,
     )
+
+    override suspend fun markUsefulAndReschedule(id: String): ReviewChange? = database.withTransaction {
+        val current = items.getById(id) ?: return@withTransaction null
+        val previous = current.toModel().reviewSnapshot()
+        val now = clock.instant()
+
+        val updated = current.copy(
+            status = ItemStatus.USEFUL,
+            lastReviewedAt = now.toEpochMilli(),
+            nextReviewAt = ReviewScheduler.nextAfterOpen(now).toEpochMilli(),
+            snoozedUntil = null,
+            updatedAt = now.toEpochMilli(),
+        )
+        items.update(updated)
+        events.insert(
+            ReviewEventEntity(
+                itemId = id,
+                action = ReviewAction.MARKED_USEFUL,
+                timestamp = now.toEpochMilli(),
+                snoozeUntil = null,
+            ),
+        )
+        ReviewChange(item = updated.toModel(), previous = previous)
+    }
 
     override suspend fun archive(id: String): ReviewChange? = transition(
         id = id,
@@ -250,6 +289,95 @@ class RoomSavedItemRepository(
             ),
         )
         ReviewChange(item = updated.toModel(), previous = currentModel.reviewSnapshot())
+    }
+
+    override suspend fun setSurfaceHint(id: String, hint: SurfaceHint): SavedItem? =
+        database.withTransaction {
+            val current = items.getById(id) ?: return@withTransaction null
+            val now = clock.instant()
+            val reviewable = current.status == ItemStatus.NEW ||
+                current.status == ItemStatus.READY ||
+                current.status == ItemStatus.SNOOZED
+
+            val updated = when (hint) {
+                SurfaceHint.QUEUE -> current.copy(
+                    surfaceHint = hint,
+                    updatedAt = now.toEpochMilli(),
+                )
+                SurfaceHint.TODAY -> if (reviewable) {
+                    current.copy(
+                        surfaceHint = hint,
+                        status = ItemStatus.READY,
+                        nextReviewAt = now.toEpochMilli(),
+                        snoozedUntil = null,
+                        updatedAt = now.toEpochMilli(),
+                    )
+                } else {
+                    current.copy(surfaceHint = hint, updatedAt = now.toEpochMilli())
+                }
+                SurfaceHint.MUTED -> current.copy(
+                    surfaceHint = hint,
+                    status = ItemStatus.ARCHIVED,
+                    nextReviewAt = null,
+                    snoozedUntil = null,
+                    lastReviewedAt = now.toEpochMilli(),
+                    updatedAt = now.toEpochMilli(),
+                )
+            }
+            if (updated == current) return@withTransaction current.toModel()
+            items.update(updated)
+            updated.toModel()
+        }
+
+    override suspend fun setExpiry(id: String, expiresAt: Instant?): SavedItem? =
+        database.withTransaction {
+            val current = items.getById(id) ?: return@withTransaction null
+            val target = expiresAt?.toEpochMilli()
+            if (current.expiresAt == target) return@withTransaction current.toModel()
+
+            val now = clock.instant()
+            val reviewable = current.status == ItemStatus.NEW ||
+                current.status == ItemStatus.READY ||
+                current.status == ItemStatus.SNOOZED
+
+            val updated = if (target == null) {
+                current.copy(expiresAt = null, updatedAt = now.toEpochMilli())
+            } else {
+                current.copy(
+                    expiresAt = target,
+                    status = if (reviewable) ItemStatus.READY else current.status,
+                    nextReviewAt = if (reviewable) now.toEpochMilli() else current.nextReviewAt,
+                    snoozedUntil = if (reviewable) null else current.snoozedUntil,
+                    updatedAt = now.toEpochMilli(),
+                )
+            }
+            items.update(updated)
+            updated.toModel()
+        }
+
+    override suspend fun setDeadline(id: String, choice: ExpiryChoice): SavedItem? =
+        setExpiry(id, choice.resolve(clock.instant(), zone))
+
+    override suspend fun applyTags(itemId: String, tags: List<String>) {
+        try {
+            database.withTransaction {
+                val existing = items.getById(itemId) ?: return@withTransaction
+                this.tags.detachAll(itemId)
+                val now = clock.instant()
+                tags.map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .forEach { name ->
+                        this.tags.insertTag(TagEntity(name, now.toEpochMilli()))
+                        this.tags.attach(SavedItemTagEntity(itemId, name))
+                    }
+                items.update(existing.copy(updatedAt = now.toEpochMilli()))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("AFTERLATER", "Tags failed for $itemId", error)
+        }
     }
 
     private suspend fun transition(id: String, action: ReviewAction, newStatus: ItemStatus): ReviewChange? =
@@ -349,5 +477,34 @@ class RoomSavedItemRepository(
         val items = items.getAll().map { it.toModel() }
         val events = events.getAll().map { it.toModel() }
         return ArchiveSnapshot(items = items, events = events)
+    }
+
+    override suspend fun restoreBackup(
+        items: List<SavedItem>,
+        events: List<ReviewEvent>,
+    ): RestoreWriteResult = database.withTransaction {
+        val insertedIds = if (items.isEmpty()) {
+            emptySet()
+        } else {
+            val rows = this@RoomSavedItemRepository.items.insertAll(items.map { it.toEntity() })
+            items.mapIndexedNotNull { index, item ->
+                if (rows.getOrNull(index)?.let { it != -1L } == true) item.id else null
+            }.toSet()
+        }
+
+        val eventsForNewItems = events.filter { it.itemId in insertedIds }
+        val eventRows = if (eventsForNewItems.isEmpty()) {
+            emptyList()
+        } else {
+            this@RoomSavedItemRepository.events.insertAll(
+                eventsForNewItems.map { it.toEntity() },
+            )
+        }
+
+        RestoreWriteResult(
+            insertedItems = insertedIds.size,
+            skippedItems = items.size - insertedIds.size,
+            insertedEvents = eventRows.count { it != -1L },
+        )
     }
 }

@@ -9,7 +9,11 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.afterlater.AfterLaterApplication
 import com.afterlater.core.model.AppSettings
 import com.afterlater.core.model.AppTheme
-import com.afterlater.data.export.ArchiveExportManager
+import com.afterlater.data.export.ArchiveBackupService
+import com.afterlater.data.export.BackupInspection
+import com.afterlater.data.export.RestoreOutcome
+import com.afterlater.data.export.RestorePreview
+import com.afterlater.data.reminder.ReminderScheduler
 import com.afterlater.data.repository.SavedItemRepository
 import com.afterlater.data.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
@@ -29,7 +33,8 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     repository: SavedItemRepository,
-    private val exportManager: ArchiveExportManager,
+    private val backupService: ArchiveBackupService,
+    private val reminderScheduler: ReminderScheduler,
 ) : ViewModel() {
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -41,6 +46,15 @@ class SettingsViewModel(
 
     private val _exporting = MutableStateFlow(false)
     val exporting: StateFlow<Boolean> = _exporting.asStateFlow()
+
+    private val _inspecting = MutableStateFlow(false)
+    val inspecting: StateFlow<Boolean> = _inspecting.asStateFlow()
+
+    private val _restoring = MutableStateFlow(false)
+    val restoring: StateFlow<Boolean> = _restoring.asStateFlow()
+
+    private val _pendingRestore = MutableStateFlow<RestorePreview?>(null)
+    val pendingRestore: StateFlow<RestorePreview?> = _pendingRestore.asStateFlow()
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -57,12 +71,63 @@ class SettingsViewModel(
         }
     }
 
+    fun setRemindersEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settingsRepository.setRemindersEnabled(enabled)
+                syncReminderSchedule()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _message.value = "The reminder schedule could not be updated."
+            }
+        }
+    }
+
+    fun setReminderTime(hour: Int, minute: Int) {
+        viewModelScope.launch {
+            try {
+                settingsRepository.setReminderTime(hour, minute)
+                syncReminderSchedule()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _message.value = "The reminder schedule could not be updated."
+            }
+        }
+    }
+
+    fun setTikTokAutoDetectEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setTikTokAutoDetectEnabled(enabled)
+        }
+    }
+
+    fun setClipboardCaptureEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setClipboardCaptureEnabled(enabled)
+        }
+    }
+
+    fun showMessage(message: String) {
+        _message.value = message
+    }
+
+    private suspend fun syncReminderSchedule() {
+        val settings = settingsRepository.currentSettings()
+        if (settings.remindersEnabled) {
+            reminderScheduler.reschedule(settings)
+        } else {
+            reminderScheduler.cancel()
+        }
+    }
+
     fun exportTo(uri: Uri) {
         if (_exporting.value) return
         viewModelScope.launch {
             _exporting.value = true
             try {
-                val count = exportManager.exportTo(uri)
+                val count = backupService.exportTo(uri)
                 _message.value = "Exported $count ${if (count == 1) "entry" else "entries"}."
             } catch (error: CancellationException) {
                 throw error
@@ -74,9 +139,80 @@ class SettingsViewModel(
         }
     }
 
+    fun inspectBackup(uri: Uri) {
+        if (_inspecting.value || _restoring.value) return
+        viewModelScope.launch {
+            _inspecting.value = true
+            try {
+                when (val result = backupService.inspectBackup(uri)) {
+                    is BackupInspection.Ready -> _pendingRestore.value = result.preview
+                    is BackupInspection.Invalid -> _message.value = result.message
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _message.value = "The selected backup could not be read."
+            } finally {
+                _inspecting.value = false
+            }
+        }
+    }
+
+    fun confirmRestore() {
+        val preview = _pendingRestore.value ?: return
+        if (_restoring.value) return
+        viewModelScope.launch {
+            _restoring.value = true
+            try {
+                when (val result = backupService.restore(preview)) {
+                    is RestoreOutcome.Success -> {
+                        _pendingRestore.value = null
+                        _message.value = restoreMessage(result)
+                    }
+                    is RestoreOutcome.Failure -> {
+                        _pendingRestore.value = null
+                        _message.value = result.message
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _pendingRestore.value = null
+                _message.value = "Restore failed. No existing entries were changed."
+            } finally {
+                _restoring.value = false
+            }
+        }
+    }
+
+    fun cancelRestore() {
+        if (!_restoring.value) {
+            _pendingRestore.value = null
+        }
+    }
+
     fun clearMessage() {
         _message.value = null
     }
+
+    private fun restoreMessage(result: RestoreOutcome.Success): String {
+        if (result.insertedItems == 0) {
+            return if (result.skippedItems == 0) {
+                "No entries were restored."
+            } else {
+                "Nothing new was added. ${entryLabel(result.skippedItems)} left unchanged."
+            }
+        }
+        val restored = "Restored ${entryLabel(result.insertedItems)}."
+        return if (result.skippedItems > 0) {
+            "$restored ${entryLabel(result.skippedItems)} left unchanged."
+        } else {
+            restored
+        }
+    }
+
+    private fun entryLabel(count: Int): String =
+        if (count == 1) "1 entry" else "$count entries"
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
@@ -85,7 +221,8 @@ class SettingsViewModel(
                 SettingsViewModel(
                     settingsRepository = app.container.settingsRepository,
                     repository = app.container.savedItemRepository,
-                    exportManager = app.container.archiveExportManager,
+                    backupService = app.container.archiveBackupManager,
+                    reminderScheduler = app.container.reminderScheduler,
                 )
             }
         }

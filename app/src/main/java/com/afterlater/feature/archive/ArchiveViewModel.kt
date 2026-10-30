@@ -26,9 +26,21 @@ import kotlinx.coroutines.launch
 
 enum class ArchiveLayout { VISUAL, COMPACT }
 
+/**
+ * The status pills shown in the archive. [statuses] is the set handed to the
+ * repository; null means every status. IN ROTATION is the undecided pool that
+ * Today draws from (see [com.afterlater.core.model.SavedItem.isReviewable]).
+ */
+enum class ArchiveStatusFilter(val label: String, val statuses: Set<ItemStatus>?) {
+    ALL("ALL", null),
+    IN_ROTATION("IN ROTATION", setOf(ItemStatus.NEW, ItemStatus.READY, ItemStatus.SNOOZED)),
+    USEFUL("USEFUL", setOf(ItemStatus.USEFUL)),
+    ARCHIVED("ARCHIVED", setOf(ItemStatus.ARCHIVED)),
+}
+
 private data class ArchiveRequest(
     val query: String,
-    val status: ItemStatus?,
+    val statuses: Set<ItemStatus>?,
     val domain: String?,
     val sort: ArchiveSort,
 )
@@ -41,8 +53,8 @@ class ArchiveViewModel(
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
-    private val _statusFilter = MutableStateFlow<ItemStatus?>(null)
-    val statusFilter: StateFlow<ItemStatus?> = _statusFilter.asStateFlow()
+    private val _statusFilter = MutableStateFlow(ArchiveStatusFilter.ALL)
+    val statusFilter: StateFlow<ArchiveStatusFilter> = _statusFilter.asStateFlow()
 
     private val _domainFilter = MutableStateFlow<String?>(null)
     val domainFilter: StateFlow<String?> = _domainFilter.asStateFlow()
@@ -67,14 +79,14 @@ class ArchiveViewModel(
         _domainFilter,
         _sort,
     ) { query, status, domain, sort ->
-        ArchiveRequest(query.trim(), status, domain, sort)
+        ArchiveRequest(query.trim(), status.statuses, domain, sort)
     }.distinctUntilChanged()
 
     val items: StateFlow<List<SavedItem>> = request
         .flatMapLatest { req ->
             repository.observeArchive(
                 query = req.query,
-                status = req.status,
+                statuses = req.statuses,
                 domain = req.domain,
                 sort = req.sort,
             )
@@ -91,8 +103,8 @@ class ArchiveViewModel(
         _query.value = value
     }
 
-    fun setStatus(status: ItemStatus?) {
-        _statusFilter.value = status
+    fun setStatus(filter: ArchiveStatusFilter) {
+        _statusFilter.value = filter
     }
 
     fun setDomain(domain: String?) {
@@ -143,7 +155,7 @@ class ArchiveViewModel(
 
     fun clearFilters() {
         _query.value = ""
-        _statusFilter.value = null
+        _statusFilter.value = ArchiveStatusFilter.ALL
         _domainFilter.value = null
     }
 

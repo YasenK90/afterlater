@@ -67,8 +67,10 @@ class TodayViewModelTest {
                         status = ItemStatus.SNOOZED,
                         snoozedUntil = now.plusSeconds(3_600),
                     ),
-                    item(id = "useful", due = now.minusSeconds(60), status = ItemStatus.USEFUL),
-                    item(id = "archived", due = now.minusSeconds(60), status = ItemStatus.ARCHIVED),
+                    // Useful and archived entries leave the rotation, so production
+                    // gives them no next review instant unless a deadline pulls them back.
+                    item(id = "useful", due = null, status = ItemStatus.USEFUL),
+                    item(id = "archived", due = null, status = ItemStatus.ARCHIVED),
                     item(id = "ready", due = now.minusSeconds(60)),
                 )
                 totalCount.value = 4

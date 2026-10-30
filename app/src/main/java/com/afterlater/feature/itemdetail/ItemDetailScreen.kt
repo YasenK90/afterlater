@@ -51,6 +51,7 @@ import com.afterlater.core.designsystem.AfterTextField
 import com.afterlater.core.designsystem.AfterType
 import com.afterlater.core.designsystem.ArchiveBackground
 import com.afterlater.core.designsystem.BottomScrim
+import com.afterlater.core.designsystem.DeadlineDialog
 import com.afterlater.core.designsystem.DomainLine
 import com.afterlater.core.designsystem.Hairline
 import com.afterlater.core.designsystem.IconAction
@@ -68,6 +69,7 @@ import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.MetadataStatus
 import com.afterlater.core.model.SavedItem
 import com.afterlater.core.util.LinkOpener
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.core.util.TimeFormat
 import java.time.Instant
 
@@ -84,6 +86,7 @@ fun ItemDetailScreen(
     val now = remember { Instant.now() }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showSnoozeDialog by remember { mutableStateOf(false) }
+    var showDeadlineDialog by remember { mutableStateOf(false) }
 
     val leaf: () -> Unit = {
         if (state.noteDirty) {
@@ -152,6 +155,8 @@ fun ItemDetailScreen(
                             viewModel.restore()
                         },
                         onRetryMetadata = viewModel::retryMetadata,
+                        onOpenDeadline = { showDeadlineDialog = true },
+                        onDeadline = viewModel::setDeadline,
                         onNoteChange = viewModel::onNoteChange,
                         onSaveNote = { viewModel.saveNote() },
                         onDelete = { showDeleteDialog = true },
@@ -197,6 +202,16 @@ fun ItemDetailScreen(
             },
         )
     }
+
+    if (showDeadlineDialog) {
+        DeadlineDialog(
+            onDismiss = { showDeadlineDialog = false },
+            onSelect = { choice ->
+                showDeadlineDialog = false
+                viewModel.setDeadline(choice)
+            },
+        )
+    }
 }
 
 @Composable
@@ -239,6 +254,8 @@ private fun DetailBody(
     onArchive: () -> Unit,
     onRestore: () -> Unit,
     onRetryMetadata: () -> Unit,
+    onOpenDeadline: () -> Unit,
+    onDeadline: (ExpiryChoice) -> Unit,
     onNoteChange: (String) -> Unit,
     onSaveNote: () -> Unit,
     onDelete: () -> Unit,
@@ -246,6 +263,7 @@ private fun DetailBody(
     val colors = LocalAfterLaterColors.current
     val description = item.description?.trim()?.takeIf { it.isNotEmpty() }
     val actionsEnabled = !state.busy
+    val expired = item.isExpired(now)
 
     Column(
         modifier = modifier
@@ -368,10 +386,49 @@ private fun DetailBody(
             )
             LabeledValue(
                 "Next review",
-                if (item.isReviewable) TimeFormat.dueLabel(item.nextReviewAt, now) else "NOT IN ROTATION",
+                if (item.isReviewable && !expired) {
+                    TimeFormat.dueLabel(item.nextReviewAt, now)
+                } else {
+                    "NOT IN ROTATION"
+                },
             )
             if (item.snoozedUntil != null) {
                 LabeledValue("Snoozed until", TimeFormat.dateTime(item.snoozedUntil))
+            }
+            LabeledValue(
+                label = "Deadline",
+                value = item.expiresAt?.let { TimeFormat.expiryLabel(it, now) } ?: "NONE",
+                valueColor = when {
+                    item.expiresAt == null -> colors.textDim
+                    expired -> colors.danger
+                    else -> colors.accent
+                },
+            )
+            if (item.expiresAt != null) {
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextAction(
+                        label = "Change deadline",
+                        onClick = onOpenDeadline,
+                        enabled = actionsEnabled,
+                        color = colors.accent,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    TextAction(
+                        label = "Clear",
+                        onClick = { onDeadline(ExpiryChoice.NONE) },
+                        enabled = actionsEnabled,
+                        color = colors.textSecondary,
+                    )
+                }
+            } else {
+                Spacer(Modifier.height(2.dp))
+                TextAction(
+                    label = "Set a deadline",
+                    onClick = onOpenDeadline,
+                    enabled = actionsEnabled,
+                    color = colors.accent,
+                )
             }
             LabeledValue(
                 label = "Preview",

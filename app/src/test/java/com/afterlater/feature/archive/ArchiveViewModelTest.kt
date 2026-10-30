@@ -8,9 +8,13 @@ import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.MetadataStatus
 import com.afterlater.core.model.ParsedLink
 import com.afterlater.core.model.ReviewChange
+import com.afterlater.core.model.ReviewEvent
 import com.afterlater.core.model.ReviewUndo
+import com.afterlater.core.model.RestoreWriteResult
 import com.afterlater.core.model.SavedItem
+import com.afterlater.core.model.SurfaceHint
 import com.afterlater.data.repository.SavedItemRepository
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.SnoozeWindow
 import com.afterlater.test.MainDispatcherRule
 import java.time.Instant
@@ -53,28 +57,35 @@ class ArchiveViewModelTest {
         }
 
     @Test
-    fun `useful and archived filters reach the repository and clearing resets them`() =
+    fun `status filters reach the repository and clearing resets them`() =
         runTest(mainDispatcherRule.dispatcher) {
             val repository = FakeArchiveRepository()
             val viewModel = ArchiveViewModel(repository)
             collectArchive(viewModel)
 
-            viewModel.setStatus(ItemStatus.USEFUL)
+            viewModel.setStatus(ArchiveStatusFilter.IN_ROTATION)
             advanceUntilIdle()
-            assertEquals(ItemStatus.USEFUL, repository.lastStatus)
+            assertEquals(
+                setOf(ItemStatus.NEW, ItemStatus.READY, ItemStatus.SNOOZED),
+                repository.lastStatuses,
+            )
 
-            viewModel.setStatus(ItemStatus.ARCHIVED)
+            viewModel.setStatus(ArchiveStatusFilter.USEFUL)
+            advanceUntilIdle()
+            assertEquals(setOf(ItemStatus.USEFUL), repository.lastStatuses)
+
+            viewModel.setStatus(ArchiveStatusFilter.ARCHIVED)
             viewModel.setDomain("example.com")
             viewModel.setQuery("  saved note  ")
             advanceUntilIdle()
-            assertEquals(ItemStatus.ARCHIVED, repository.lastStatus)
+            assertEquals(setOf(ItemStatus.ARCHIVED), repository.lastStatuses)
             assertEquals("example.com", repository.lastDomain)
             assertEquals("saved note", repository.lastQuery)
             assertEquals(ArchiveSort.NEWEST, repository.lastSort)
 
             viewModel.clearFilters()
             advanceUntilIdle()
-            assertNull(repository.lastStatus)
+            assertNull(repository.lastStatuses)
             assertNull(repository.lastDomain)
             assertEquals("", repository.lastQuery)
         }
@@ -140,7 +151,7 @@ class ArchiveViewModelTest {
 private class FakeArchiveRepository : SavedItemRepository {
 
     var lastQuery: String? = null
-    var lastStatus: ItemStatus? = null
+    var lastStatuses: Set<ItemStatus>? = null
     var lastDomain: String? = null
     var lastSort: ArchiveSort? = null
 
@@ -153,15 +164,15 @@ private class FakeArchiveRepository : SavedItemRepository {
 
     override fun observeArchive(
         query: String,
-        status: ItemStatus?,
+        statuses: Set<ItemStatus>?,
         domain: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> {
         lastQuery = query
-        lastStatus = status
+        lastStatuses = statuses
         lastDomain = domain
         lastSort = sort
-        return flowOf(listOf(savedItem(status = status ?: ItemStatus.ARCHIVED)))
+        return flowOf(listOf(savedItem(status = statuses?.singleOrNull() ?: ItemStatus.ARCHIVED)))
     }
 
     override fun observeDomains(): Flow<List<String>> = flowOf(listOf("example.com"))
@@ -201,6 +212,14 @@ private class FakeArchiveRepository : SavedItemRepository {
 
     override suspend fun undoReview(undo: ReviewUndo): ReviewChange? = error("not used")
 
+    override suspend fun setSurfaceHint(id: String, hint: SurfaceHint): SavedItem? = error("not used")
+
+    override suspend fun setExpiry(id: String, expiresAt: Instant?): SavedItem? = error("not used")
+
+    override suspend fun setDeadline(id: String, choice: ExpiryChoice): SavedItem? = error("not used")
+
+    override suspend fun applyTags(itemId: String, tags: List<String>) = Unit
+
     override suspend fun updateNote(id: String, note: String?): SavedItem? = error("not used")
 
     override suspend fun applyMetadata(id: String, metadata: ItemMetadata) = Unit
@@ -212,6 +231,13 @@ private class FakeArchiveRepository : SavedItemRepository {
     override suspend fun retryMetadata(id: String) = Unit
 
     override suspend fun exportSnapshot(): ArchiveSnapshot = error("not used")
+
+    override suspend fun restoreBackup(
+        items: List<SavedItem>,
+        events: List<ReviewEvent>,
+    ): RestoreWriteResult = error("not used")
+
+    override suspend fun markUsefulAndReschedule(id: String): ReviewChange? = error("not used")
 }
 
 private fun savedItem(

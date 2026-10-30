@@ -76,14 +76,6 @@ import com.afterlater.core.model.SavedItem
 import com.afterlater.core.util.TimeFormat
 import java.time.Instant
 
-private data class StatusOption(val status: ItemStatus?, val label: String)
-
-private val statusOptions = listOf(
-    StatusOption(null, "ALL"),
-    StatusOption(ItemStatus.USEFUL, "USEFUL"),
-    StatusOption(ItemStatus.ARCHIVED, "ARCHIVED"),
-)
-
 private val sortOptions = listOf(
     ArchiveSort.NEWEST.name to "NEWEST",
     ArchiveSort.OLDEST.name to "OLDEST",
@@ -118,7 +110,7 @@ fun ArchiveScreen(
     val now = remember { Instant.now() }
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<SavedItem?>(null) }
-    val hasFilters = query.isNotBlank() || statusFilter != null || domainFilter != null
+    val hasFilters = query.isNotBlank() || statusFilter != ArchiveStatusFilter.ALL || domainFilter != null
     val domainValue = domainFilter ?: "ALL"
 
     LaunchedEffect(message) {
@@ -211,11 +203,11 @@ fun ArchiveScreen(
                     .padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                statusOptions.forEach { option ->
+                ArchiveStatusFilter.entries.forEach { option ->
                     FilterPill(
                         label = option.label,
-                        selected = statusFilter == option.status,
-                        onClick = { viewModel.setStatus(option.status) },
+                        selected = statusFilter == option,
+                        onClick = { viewModel.setStatus(option) },
                     )
                 }
             }
@@ -375,6 +367,14 @@ private fun ArchiveVisualCard(
                     color = colors.textDim,
                     style = AfterType.MonoSmall,
                 )
+                item.expiresAt?.let { deadline ->
+                    Spacer(Modifier.width(8.dp))
+                    Mono(
+                        TimeFormat.expiryLabel(deadline, now),
+                        color = if (item.isExpired(now)) colors.danger else colors.textSecondary,
+                        style = AfterType.MonoSmall,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 if (item.metadataStatus == MetadataStatus.FAILED) {
                     Mono("PREVIEW FAILED", color = colors.danger, style = AfterType.MonoSmall)
@@ -446,6 +446,14 @@ private fun ArchiveCompactRow(
                 )
                 Spacer(Modifier.height(4.dp))
                 DomainLine(item.domain, color = colors.textDim)
+                item.expiresAt?.let { deadline ->
+                    Spacer(Modifier.height(4.dp))
+                    Mono(
+                        TimeFormat.expiryLabel(deadline, now),
+                        color = if (item.isExpired(now)) colors.danger else colors.textSecondary,
+                        style = AfterType.MonoSmall,
+                    )
+                }
                 if (note != null) {
                     Spacer(Modifier.height(5.dp))
                     Text(note, AfterType.BodySmall, colors.textSecondary, maxLines = 1)

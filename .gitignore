@@ -3,6 +3,9 @@
 build/
 app/build/
 local.properties
+keystore.properties
+*.jks
+*.keystore
 .idea/
 *.iml
 .DS_Store
@@ -11,3 +14,14 @@ captures/
 .cxx/
 *.apk
 *.aab
+
+# Decompiled TikTok APK used locally to research the share sheet; never publish.
+tiktok/
+
+# Local tool state.
+.omc/
+.sisyphus/
+
+# Accidental copy of a home directory created inside the project; contains
+# personal files and must never be committed.
+~/

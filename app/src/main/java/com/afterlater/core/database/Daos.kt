@@ -13,6 +13,9 @@ interface SavedItemDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(item: SavedItemEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(items: List<SavedItemEntity>): List<Long>
+
     @Update
     suspend fun update(item: SavedItemEntity)
 
@@ -35,7 +38,7 @@ interface SavedItemDao {
             OR domain LIKE '%' || :query || '%' ESCAPE '\'
             OR originalUrl LIKE '%' || :query || '%' ESCAPE '\'
             OR canonicalUrl LIKE '%' || :query || '%' ESCAPE '\')
-        AND (:status IS NULL OR status = :status)
+        AND status IN (:statuses)
         AND (:domain IS NULL OR domain = :domain)
         ORDER BY
             CASE WHEN :sort = 'NEWEST' THEN savedAt END DESC,
@@ -46,7 +49,7 @@ interface SavedItemDao {
     )
     fun observeArchive(
         query: String,
-        status: String?,
+        statuses: List<String>,
         domain: String?,
         sort: String,
     ): Flow<List<SavedItemEntity>>
@@ -57,9 +60,10 @@ interface SavedItemDao {
     @Query(
         """
         SELECT COUNT(*) FROM saved_items
-        WHERE status IN ('NEW', 'READY', 'SNOOZED')
+        WHERE status IN ('NEW', 'READY', 'SNOOZED', 'USEFUL')
         AND nextReviewAt IS NOT NULL AND nextReviewAt <= :now
         AND (snoozedUntil IS NULL OR snoozedUntil <= :now)
+        AND (expiresAt IS NULL OR expiresAt > :now)
         """,
     )
     fun observeDueCount(now: Long): Flow<Int>
@@ -67,9 +71,10 @@ interface SavedItemDao {
     @Query(
         """
         SELECT * FROM saved_items
-        WHERE status IN ('NEW', 'READY', 'SNOOZED')
+        WHERE status IN ('NEW', 'READY', 'SNOOZED', 'USEFUL')
         AND nextReviewAt IS NOT NULL AND nextReviewAt <= :now
         AND (snoozedUntil IS NULL OR snoozedUntil <= :now)
+        AND (expiresAt IS NULL OR expiresAt > :now)
         ORDER BY
             CASE WHEN lastReviewedAt IS NULL THEN 0 ELSE 1 END ASC,
             savedAt ASC,
@@ -83,9 +88,10 @@ interface SavedItemDao {
     @Query(
         """
         SELECT * FROM saved_items
-        WHERE status IN ('NEW', 'READY', 'SNOOZED')
+        WHERE status IN ('NEW', 'READY', 'SNOOZED', 'USEFUL')
         AND nextReviewAt IS NOT NULL AND nextReviewAt <= :now
         AND (snoozedUntil IS NULL OR snoozedUntil <= :now)
+        AND (expiresAt IS NULL OR expiresAt > :now)
         ORDER BY
             CASE WHEN lastReviewedAt IS NULL THEN 0 ELSE 1 END ASC,
             savedAt ASC,
@@ -112,6 +118,9 @@ interface ReviewEventDao {
     @Insert
     suspend fun insert(event: ReviewEventEntity)
 
+    @Insert
+    suspend fun insertAll(events: List<ReviewEventEntity>): List<Long>
+
     @Query("SELECT * FROM review_events WHERE itemId = :itemId ORDER BY timestamp DESC")
     fun observeForItem(itemId: String): Flow<List<ReviewEventEntity>>
 
@@ -120,4 +129,26 @@ interface ReviewEventDao {
 
     @Query("DELETE FROM review_events WHERE itemId = :itemId")
     suspend fun deleteForItem(itemId: String)
+}
+
+@Dao
+interface TagDao {
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTag(tag: TagEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun attach(link: SavedItemTagEntity): Long
+
+    @Query("SELECT tagName FROM saved_item_tags WHERE itemId = :itemId ORDER BY tagName ASC")
+    suspend fun tagsForItem(itemId: String): List<String>
+
+    @Query("SELECT * FROM tags ORDER BY createdAt ASC")
+    fun observeAll(): Flow<List<TagEntity>>
+
+    @Query("DELETE FROM saved_item_tags WHERE itemId = :itemId")
+    suspend fun detachAll(itemId: String)
+
+    @Query("DELETE FROM saved_item_tags WHERE itemId = :itemId AND tagName = :tagName")
+    suspend fun detach(itemId: String, tagName: String)
 }

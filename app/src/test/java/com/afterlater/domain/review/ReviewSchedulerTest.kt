@@ -49,9 +49,21 @@ class ReviewSchedulerTest {
                 now,
             ),
         )
-        assertFalse(
+        assertTrue(
             ReviewScheduler.isEligible(
                 item(due = now.minusSeconds(60), status = ItemStatus.USEFUL),
+                now,
+            ),
+        )
+        assertFalse(
+            ReviewScheduler.isEligible(
+                item(due = null, status = ItemStatus.USEFUL),
+                now,
+            ),
+        )
+        assertFalse(
+            ReviewScheduler.isEligible(
+                item(due = now.plusSeconds(60), status = ItemStatus.USEFUL),
                 now,
             ),
         )
@@ -274,6 +286,85 @@ class ReviewSchedulerTest {
         assertEquals(listOf("a", "b"), batch.map { it.id })
     }
 
+    @Test
+    fun `a live deadline surfaces before the settle delay`() {
+        val justSaved = now.minusSeconds(30)
+
+        assertTrue(
+            ReviewScheduler.isEligible(
+                item(due = now.plus(Duration.ofHours(23)), savedAt = justSaved, expiresAt = now.plus(Duration.ofHours(2))),
+                now,
+            ),
+        )
+    }
+
+    @Test
+    fun `an expired deadline is never eligible again`() {
+        assertFalse(
+            ReviewScheduler.isEligible(
+                item(due = now.minusSeconds(60), expiresAt = now),
+                now,
+            ),
+        )
+        assertFalse(
+            ReviewScheduler.isEligible(
+                item(due = now.minusSeconds(60), expiresAt = now.minusSeconds(1)),
+                now,
+            ),
+        )
+    }
+
+    @Test
+    fun `a deadline stops forcing eligibility once the item is reviewed`() {
+        val reviewed = item(
+            due = now.plus(Duration.ofDays(7)),
+            savedAt = now.minus(Duration.ofDays(2)),
+            lastReviewedAt = now.minusSeconds(10),
+            expiresAt = now.plus(Duration.ofHours(2)),
+        )
+
+        assertFalse(ReviewScheduler.isEligible(reviewed, now))
+    }
+
+    @Test
+    fun `daily batch leads with the soonest deadline`() {
+        val ordinary = item(id = "ordinary", domain = "alpha.com", due = now.minusSeconds(400))
+        val laterDeadline = item(
+            id = "later",
+            domain = "beta.com",
+            due = now.minusSeconds(300),
+            expiresAt = now.plus(Duration.ofHours(9)),
+        )
+        val soonerDeadline = item(
+            id = "sooner",
+            domain = "gamma.com",
+            due = now.minusSeconds(200),
+            expiresAt = now.plus(Duration.ofHours(2)),
+        )
+
+        val batch = ReviewScheduler.selectDailyBatch(
+            listOf(ordinary, laterDeadline, soonerDeadline),
+            limit = 3,
+            now = now,
+        )
+
+        assertEquals(listOf("sooner", "later", "ordinary"), batch.map { it.id })
+    }
+
+    @Test
+    fun `snooze cannot outlive a deadline`() {
+        val deadline = now.plus(Duration.ofHours(5))
+
+        assertEquals(
+            deadline,
+            ReviewScheduler.snoozeUntil(now, SnoozeWindow.NEXT_WEEK, deadline),
+        )
+        assertEquals(
+            now.plus(Duration.ofDays(1)),
+            ReviewScheduler.snoozeUntil(now, SnoozeWindow.TOMORROW, deadline.plus(Duration.ofDays(30))),
+        )
+    }
+
     private fun item(
         id: String = "item",
         domain: String = "example.com",
@@ -282,6 +373,7 @@ class ReviewSchedulerTest {
         status: ItemStatus = ItemStatus.READY,
         lastReviewedAt: Instant? = null,
         snoozedUntil: Instant? = null,
+        expiresAt: Instant? = null,
     ) = SavedItem(
         id = id,
         originalUrl = "https://$domain/$id",
@@ -298,5 +390,6 @@ class ReviewSchedulerTest {
         snoozedUntil = snoozedUntil,
         personalNote = null,
         metadataStatus = MetadataStatus.PENDING,
+        expiresAt = expiresAt,
     )
 }

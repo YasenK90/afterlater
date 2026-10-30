@@ -89,6 +89,8 @@ fun AfterLaterApp(
     onDeepLinkConsumed: () -> Unit = {},
     quickAddRequested: Boolean = false,
     onQuickAddConsumed: () -> Unit = {},
+    openTodayRequested: Boolean = false,
+    onOpenTodayConsumed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -107,6 +109,13 @@ fun AfterLaterApp(
         if (quickAddRequested) {
             navController.navigate(ROUTE_QUICK_ADD) { launchSingleTop = true }
             onQuickAddConsumed()
+        }
+    }
+
+    LaunchedEffect(openTodayRequested) {
+        if (openTodayRequested) {
+            navController.navigateTopLevel(ROUTE_TODAY)
+            onOpenTodayConsumed()
         }
     }
 

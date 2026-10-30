@@ -22,9 +22,15 @@ object ReviewScheduler {
     fun isEligible(item: SavedItem, now: Instant): Boolean {
         if (item.status != ItemStatus.NEW &&
             item.status != ItemStatus.READY &&
-            item.status != ItemStatus.SNOOZED
+            item.status != ItemStatus.SNOOZED &&
+            item.status != ItemStatus.USEFUL
         ) {
             return false
+        }
+        val expiresAt = item.expiresAt
+        if (expiresAt != null) {
+            if (!expiresAt.isAfter(now)) return false
+            if (!item.reviewedSinceSaving()) return true
         }
         val due = item.nextReviewAt ?: return false
         if (due.isAfter(now)) return false
@@ -32,7 +38,13 @@ object ReviewScheduler {
         return !snoozedUntil.isAfter(now)
     }
 
-    fun snoozeUntil(now: Instant, window: SnoozeWindow): Instant = now.plus(window.duration)
+    fun snoozeUntil(now: Instant, window: SnoozeWindow, expiresAt: Instant? = null): Instant {
+        val requested = now.plus(window.duration)
+        return if (expiresAt != null && expiresAt.isBefore(requested)) expiresAt else requested
+    }
+
+    private fun SavedItem.reviewedSinceSaving(): Boolean =
+        lastReviewedAt?.let { !it.isBefore(savedAt) } == true
 
     /**
      * Builds one day's batch. All never-reviewed entries are considered before
@@ -72,8 +84,9 @@ object ReviewScheduler {
             }
         }
 
-        appendGroup(eligible.filter { it.lastReviewedAt == null })
-        appendGroup(eligible.filter { it.lastReviewedAt != null })
+        appendGroup(eligible.filter { it.expiresAt != null }.sortedBy { it.expiresAt })
+        appendGroup(eligible.filter { it.expiresAt == null && it.lastReviewedAt == null })
+        appendGroup(eligible.filter { it.expiresAt == null && it.lastReviewedAt != null })
         return selected
     }
 }

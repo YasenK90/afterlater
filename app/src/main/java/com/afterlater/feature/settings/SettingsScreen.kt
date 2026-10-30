@@ -1,5 +1,10 @@
 package com.afterlater.feature.settings
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -21,22 +26,38 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.afterlater.BuildConfig
+import com.afterlater.auto.AutoDetectPermissions
 import com.afterlater.core.designsystem.AfterButton
 import com.afterlater.core.designsystem.AfterButtonStyle
 import com.afterlater.core.designsystem.AfterIcons
@@ -51,26 +72,85 @@ import com.afterlater.core.designsystem.LocalAfterLaterColors
 import com.afterlater.core.designsystem.Mono
 import com.afterlater.core.designsystem.SectionMark
 import com.afterlater.core.designsystem.Text
+import com.afterlater.core.designsystem.TextAction
 import com.afterlater.core.designsystem.Wordmark
 import com.afterlater.core.model.AppSettings
 import com.afterlater.core.model.AppTheme
 import com.afterlater.core.util.TimeFormat
+import com.afterlater.data.export.RestorePreview
+import com.afterlater.data.reminder.areReminderNotificationsAllowed
 import java.time.LocalDate
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val exporting by viewModel.exporting.collectAsStateWithLifecycle()
+    val inspecting by viewModel.inspecting.collectAsStateWithLifecycle()
+    val restoring by viewModel.restoring.collectAsStateWithLifecycle()
+    val pendingRestore by viewModel.pendingRestore.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val colors = LocalAfterLaterColors.current
+    val context = LocalContext.current
+    var notificationsAllowed by remember {
+        mutableStateOf(areReminderNotificationsAllowed(context))
+    }
+    var accessibilityEnabled by remember {
+        mutableStateOf(AutoDetectPermissions.isAccessibilityServiceEnabled(context))
+    }
+    var overlayAllowed by remember {
+        mutableStateOf(AutoDetectPermissions.canDrawOverlays(context))
+    }
+    var showReminderTime by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val allowed = areReminderNotificationsAllowed(context)
+        notificationsAllowed = allowed
+        if (granted && allowed) {
+            viewModel.setRemindersEnabled(true)
+        } else {
+            viewModel.showMessage("Notifications are blocked. Reminders will stay off.")
+        }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notificationsAllowed = areReminderNotificationsAllowed(context)
+        accessibilityEnabled = AutoDetectPermissions.isAccessibilityServiceEnabled(context)
+        overlayAllowed = AutoDetectPermissions.canDrawOverlays(context)
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         if (uri != null) viewModel.exportTo(uri)
     }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) viewModel.inspectBackup(uri)
+    }
     val exportName = remember { "afterlater-archive-${LocalDate.now()}.json" }
+    val onRemindersToggle: (Boolean) -> Unit = { enabled ->
+        if (!enabled) {
+            viewModel.setRemindersEnabled(false)
+        } else {
+            notificationsAllowed = areReminderNotificationsAllowed(context)
+            val permissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            when {
+                permissionMissing -> notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                !notificationsAllowed -> viewModel.showMessage(
+                    "Notifications are blocked in Android settings.",
+                )
+                else -> viewModel.setRemindersEnabled(true)
+            }
+        }
+    }
 
     LaunchedEffect(message) {
         val current = message
@@ -143,14 +223,18 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                         AfterButton(
                             label = "-",
                             onClick = { viewModel.setDailyLimit(state.settings.dailyReviewLimit - 1) },
-                            modifier = Modifier.width(64.dp),
+                            modifier = Modifier
+                                .width(64.dp)
+                                .semantics { contentDescription = "Decrease daily review limit" },
                             style = AfterButtonStyle.OUTLINE,
                             enabled = state.settings.dailyReviewLimit > AppSettings.MIN_DAILY_LIMIT,
                         )
                         AfterButton(
                             label = "+",
                             onClick = { viewModel.setDailyLimit(state.settings.dailyReviewLimit + 1) },
-                            modifier = Modifier.width(64.dp),
+                            modifier = Modifier
+                                .width(64.dp)
+                                .semantics { contentDescription = "Increase daily review limit" },
                             style = AfterButtonStyle.OUTLINE,
                             enabled = state.settings.dailyReviewLimit < AppSettings.MAX_DAILY_LIMIT,
                         )
@@ -214,12 +298,288 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     Spacer(Modifier.height(18.dp))
                     SectionMark(
                         index = "04",
+                        title = "REMINDERS",
+                        trailing = if (state.settings.remindersEnabled) "ON" else "OFF",
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "One quiet note a day, only when something is actually ready in Today.",
+                        AfterType.BodySmall,
+                        colors.textSecondary,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = state.settings.remindersEnabled,
+                                role = Role.Switch,
+                                onValueChange = onRemindersToggle,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Mono("DAILY REMINDER", color = colors.textPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                if (state.settings.remindersEnabled) {
+                                    "A single reminder at your chosen time. Never on an empty Today."
+                                } else {
+                                    "Off. AFTERLATER will not send reminders."
+                                },
+                                AfterType.BodySmall,
+                                colors.textSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = state.settings.remindersEnabled,
+                            onCheckedChange = null,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = colors.accentInk,
+                                checkedTrackColor = colors.accent,
+                                checkedBorderColor = colors.accent,
+                                uncheckedThumbColor = colors.textSecondary,
+                                uncheckedTrackColor = colors.surface,
+                                uncheckedBorderColor = colors.borderStrong,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Mono("TIME", color = colors.textDim)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                reminderTimeLabel(
+                                    state.settings.reminderHour,
+                                    state.settings.reminderMinute,
+                                ),
+                                AfterType.DisplaySmall,
+                                colors.textPrimary,
+                            )
+                        }
+                        AfterButton(
+                            label = "Change time",
+                            onClick = { showReminderTime = true },
+                            style = AfterButtonStyle.OUTLINE,
+                            icon = AfterIcons.Clock,
+                        )
+                    }
+                    if (!notificationsAllowed) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Android notifications are off for AFTERLATER. Reminders cannot be delivered until you allow them.",
+                            AfterType.BodySmall,
+                            colors.danger,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        TextAction(
+                            label = "Open notification settings",
+                            onClick = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    },
+                                )
+                            },
+                        )
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    Hairline()
+                    Spacer(Modifier.height(18.dp))
+                    SectionMark(
+                        index = "05",
+                        title = "TIKTOK AUTO-DETECT",
+                        trailing = if (state.settings.tiktokAutoDetectEnabled) "ON" else "OFF",
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Experimental. When TikTok exposes a video link in its share sheet, AFTERLATER offers a local save prompt. It never guesses a link and never saves without your tap.",
+                        AfterType.BodySmall,
+                        colors.textSecondary,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = state.settings.tiktokAutoDetectEnabled,
+                                role = Role.Switch,
+                                onValueChange = { enabled: Boolean ->
+                                    viewModel.setTikTokAutoDetectEnabled(enabled)
+                                    if (enabled && (!accessibilityEnabled || !overlayAllowed)) {
+                                        viewModel.showMessage(
+                                            "Enable both permissions below to use TikTok auto-detect.",
+                                        )
+                                    }
+                                },
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Mono("DETECT IN TIKTOK", color = colors.textPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                if (state.settings.tiktokAutoDetectEnabled) {
+                                    "Watching TikTok's share sheet for a video link."
+                                } else {
+                                    "Off. AFTERLATER does not inspect TikTok."
+                                },
+                                AfterType.BodySmall,
+                                colors.textSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = state.settings.tiktokAutoDetectEnabled,
+                            onCheckedChange = null,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = colors.accentInk,
+                                checkedTrackColor = colors.accent,
+                                checkedBorderColor = colors.accent,
+                                uncheckedThumbColor = colors.textSecondary,
+                                uncheckedTrackColor = colors.surface,
+                                uncheckedBorderColor = colors.borderStrong,
+                            ),
+                        )
+                    }
+                    if (state.settings.tiktokAutoDetectEnabled) {
+                        Spacer(Modifier.height(14.dp))
+                        AutoDetectPermissionRow(
+                            label = "ACCESSIBILITY SERVICE",
+                            status = if (accessibilityEnabled) "ENABLED" else "NOT ENABLED",
+                            granted = accessibilityEnabled,
+                            actionLabel = if (accessibilityEnabled) "Open settings" else "Enable",
+                            onAction = {
+                                context.startActivity(AutoDetectPermissions.accessibilitySettingsIntent())
+                            },
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        AutoDetectPermissionRow(
+                            label = "DISPLAY OVER OTHER APPS",
+                            status = if (overlayAllowed) "ALLOWED" else "NOT ALLOWED",
+                            granted = overlayAllowed,
+                            actionLabel = if (overlayAllowed) "Open settings" else "Allow",
+                            onAction = {
+                                context.startActivity(AutoDetectPermissions.overlaySettingsIntent(context))
+                            },
+                        )
+                        if (!accessibilityEnabled || !overlayAllowed) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Both permissions are required. Until they are enabled, no TikTok prompt can appear.",
+                                AfterType.BodySmall,
+                                colors.danger,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Only a URL actually exposed by TikTok's share sheet is used. If TikTok hides it, no prompt appears.",
+                            AfterType.MonoSmall,
+                            colors.textDim,
+                        )
+                        if (BuildConfig.DEBUG) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "Debug builds log detected accessibility text under AFTERLATER-DETECT.",
+                                AfterType.MonoSmall,
+                                colors.textDim,
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    Hairline()
+                    Spacer(Modifier.height(18.dp))
+                    SectionMark(
+                        index = "06",
+                        title = "CLIPBOARD CARD",
+                        trailing = if (state.settings.clipboardCaptureEnabled) "ON" else "OFF",
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Copy a link in any app and a card slides in from the right. Save it in one tap, then say whether it should surface today and whether it expires.",
+                        AfterType.BodySmall,
+                        colors.textSecondary,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = state.settings.clipboardCaptureEnabled,
+                                role = Role.Switch,
+                                onValueChange = { enabled: Boolean ->
+                                    viewModel.setClipboardCaptureEnabled(enabled)
+                                    if (enabled && (!accessibilityEnabled || !overlayAllowed)) {
+                                        viewModel.showMessage(
+                                            "Enable both permissions above to use the clipboard card.",
+                                        )
+                                    }
+                                },
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Mono("WATCH THE CLIPBOARD", color = colors.textPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                if (state.settings.clipboardCaptureEnabled) {
+                                    "A copied link opens the card. The text is read on this device only."
+                                } else {
+                                    "Off. AFTERLATER does not read the clipboard."
+                                },
+                                AfterType.BodySmall,
+                                colors.textSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = state.settings.clipboardCaptureEnabled,
+                            onCheckedChange = null,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = colors.accentInk,
+                                checkedTrackColor = colors.accent,
+                                checkedBorderColor = colors.accent,
+                                uncheckedThumbColor = colors.textSecondary,
+                                uncheckedTrackColor = colors.surface,
+                                uncheckedBorderColor = colors.borderStrong,
+                            ),
+                        )
+                    }
+                    if (state.settings.clipboardCaptureEnabled) {
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            "Android only lets a background app read the clipboard while it has input focus, so the card takes focus for a few frames before reading. Nothing is saved without your tap and the text never leaves the device.",
+                            AfterType.MonoSmall,
+                            colors.textDim,
+                        )
+                        if (!accessibilityEnabled || !overlayAllowed) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Both permissions above are required for the clipboard card as well.",
+                                AfterType.BodySmall,
+                                colors.danger,
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    Hairline()
+                    Spacer(Modifier.height(18.dp))
+                    SectionMark(
+                        index = "07",
                         title = "YOUR DATA",
                         trailing = TimeFormat.countLabel(state.totalItems, "ENTRY", "ENTRIES"),
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Everything lives in a local database on this device. Export a readable JSON copy whenever you want. Import is intentionally not implemented.",
+                        "Everything lives in a local database on this device. Export a readable JSON copy or restore one you saved earlier. Restore only adds entries that are missing.",
                         AfterType.BodySmall,
                         colors.textSecondary,
                     )
@@ -227,12 +587,24 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     AfterButton(
                         label = if (exporting) "Exporting…" else "Export JSON",
                         onClick = { exportLauncher.launch(exportName) },
-                        enabled = !exporting,
+                        enabled = !exporting && !inspecting && !restoring,
                         icon = AfterIcons.ArrowUpRight,
                     )
                     Spacer(Modifier.height(8.dp))
+                    AfterButton(
+                        label = if (inspecting) "Reading…" else "Restore JSON",
+                        onClick = {
+                            importLauncher.launch(
+                                arrayOf("application/json", "text/plain", "application/octet-stream"),
+                            )
+                        },
+                        enabled = !exporting && !inspecting && !restoring,
+                        style = AfterButtonStyle.OUTLINE,
+                        icon = AfterIcons.ArchiveBox,
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        "Uses the system file picker. AFTERLATER never requests storage access.",
+                        "Uses the system file picker. You will see exactly what will be added before anything is restored. Existing entries are never overwritten or deleted.",
                         AfterType.MonoSmall,
                         colors.textDim,
                     )
@@ -240,7 +612,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     Spacer(Modifier.height(24.dp))
                     Hairline()
                     Spacer(Modifier.height(18.dp))
-                    SectionMark(index = "05", title = "ABOUT")
+                    SectionMark(index = "08", title = "ABOUT")
                     Spacer(Modifier.height(4.dp))
                     LabeledValue("Version", BuildConfig.VERSION_NAME)
                     LabeledValue("Archive", TimeFormat.countLabel(state.totalItems, "ENTRY", "ENTRIES"))
@@ -272,7 +644,179 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             ) { data -> Snackbar(snackbarData = data) }
         }
     }
+
+    pendingRestore?.let { preview ->
+        RestoreBackupDialog(
+            preview = preview,
+            restoring = restoring,
+            onDismiss = viewModel::cancelRestore,
+            onConfirm = viewModel::confirmRestore,
+        )
+    }
+
+    if (showReminderTime) {
+        ReminderTimeDialog(
+            initialHour = state.settings.reminderHour,
+            initialMinute = state.settings.reminderMinute,
+            onDismiss = { showReminderTime = false },
+            onConfirm = { hour, minute ->
+                showReminderTime = false
+                viewModel.setReminderTime(hour, minute)
+            },
+        )
+    }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReminderTimeDialog(
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit,
+) {
+    val colors = LocalAfterLaterColors.current
+    val picker = rememberTimePickerState(
+        initialHour = initialHour,
+        initialMinute = initialMinute,
+        is24Hour = true,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+        shape = RoundedCornerShape(2.dp),
+        tonalElevation = 0.dp,
+        title = {
+            Text("REMINDER TIME", AfterType.DisplaySmall, colors.textPrimary)
+        },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                TimePicker(state = picker)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Only one reminder is sent each day, and only when Today has something to review.",
+                    AfterType.BodySmall,
+                    colors.textSecondary,
+                )
+            }
+        },
+        confirmButton = {
+            TextAction(
+                label = "Set time",
+                onClick = { onConfirm(picker.hour, picker.minute) },
+            )
+        },
+        dismissButton = {
+            TextAction(
+                label = "Cancel",
+                onClick = onDismiss,
+                color = colors.textSecondary,
+            )
+        },
+    )
+}
+
+private fun reminderTimeLabel(hour: Int, minute: Int): String =
+    String.format(Locale.US, "%02d:%02d", hour, minute)
+
+@Composable
+private fun AutoDetectPermissionRow(
+    label: String,
+    status: String,
+    granted: Boolean,
+    actionLabel: String,
+    onAction: () -> Unit,
+) {
+    val colors = LocalAfterLaterColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Mono(label, color = colors.textDim)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                status,
+                AfterType.MonoSmall,
+                if (granted) colors.accent else colors.danger,
+            )
+        }
+        TextAction(label = actionLabel, onClick = onAction)
+    }
+}
+
+@Composable
+private fun RestoreBackupDialog(
+    preview: RestorePreview,
+    restoring: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = LocalAfterLaterColors.current
+    AlertDialog(
+        onDismissRequest = { if (!restoring) onDismiss() },
+        containerColor = colors.surface,
+        shape = RoundedCornerShape(2.dp),
+        tonalElevation = 0.dp,
+        title = {
+            Text("RESTORE FROM BACKUP?", AfterType.DisplaySmall, colors.textPrimary)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Backup from ${TimeFormat.dateTime(preview.exportedAt)} contains ${entryLabel(preview.backupItemCount)}.",
+                    AfterType.Body,
+                    colors.textSecondary,
+                )
+                Text(
+                    if (preview.newItemCount == 0) {
+                        "Nothing new will be added. Your archive will stay exactly as it is."
+                    } else {
+                        "${entryLabel(preview.newItemCount)} will be added with their notes, statuses, and review dates."
+                    },
+                    AfterType.Body,
+                    colors.textPrimary,
+                )
+                if (preview.duplicateCount > 0) {
+                    Text(
+                        "${entryLabel(preview.duplicateCount)} already exist or repeat in this backup. They will be left unchanged.",
+                        AfterType.Body,
+                        colors.textSecondary,
+                    )
+                }
+                Text(
+                    "No existing entry will be overwritten or deleted.",
+                    AfterType.MonoSmall,
+                    colors.accent,
+                )
+            }
+        },
+        confirmButton = {
+            TextAction(
+                label = if (restoring) {
+                    "Restoring…"
+                } else if (preview.newItemCount == 0) {
+                    "Nothing to restore"
+                } else {
+                    "Restore ${preview.newItemCount}"
+                },
+                onClick = onConfirm,
+                enabled = !restoring && preview.newItemCount > 0,
+            )
+        },
+        dismissButton = {
+            TextAction(
+                label = "Cancel",
+                onClick = onDismiss,
+                color = colors.textSecondary,
+                enabled = !restoring,
+            )
+        },
+    )
+}
+
+private fun entryLabel(count: Int): String =
+    if (count == 1) "1 entry" else "$count entries"
 
 @Composable
 private fun ThemeChoice(

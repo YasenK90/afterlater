@@ -8,10 +8,14 @@ import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.MetadataStatus
 import com.afterlater.core.model.ParsedLink
 import com.afterlater.core.model.ReviewChange
+import com.afterlater.core.model.ReviewEvent
 import com.afterlater.core.model.ReviewUndo
+import com.afterlater.core.model.RestoreWriteResult
 import com.afterlater.core.model.SavedItem
 import com.afterlater.core.model.SharedContent
+import com.afterlater.core.model.SurfaceHint
 import com.afterlater.data.repository.SavedItemRepository
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.SnoozeWindow
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
@@ -170,7 +174,7 @@ private class FakeShareRepository : SavedItemRepository {
 
     override fun observeArchive(
         query: String,
-        status: ItemStatus?,
+        statuses: Set<ItemStatus>?,
         domain: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> = flowOf(emptyList())
@@ -201,6 +205,14 @@ private class FakeShareRepository : SavedItemRepository {
 
     override suspend fun undoReview(undo: ReviewUndo): ReviewChange? = error("not used")
 
+    override suspend fun setSurfaceHint(id: String, hint: SurfaceHint): SavedItem? = error("not used")
+
+    override suspend fun setExpiry(id: String, expiresAt: Instant?): SavedItem? = error("not used")
+
+    override suspend fun setDeadline(id: String, choice: ExpiryChoice): SavedItem? = error("not used")
+
+    override suspend fun applyTags(itemId: String, tags: List<String>) = Unit
+
     override suspend fun updateNote(id: String, note: String?): SavedItem? = error("not used")
 
     override suspend fun delete(id: String): Boolean = false
@@ -214,6 +226,13 @@ private class FakeShareRepository : SavedItemRepository {
     override suspend fun retryMetadata(id: String) = Unit
 
     override suspend fun exportSnapshot(): ArchiveSnapshot = error("not used")
+
+    override suspend fun restoreBackup(
+        items: List<SavedItem>,
+        events: List<ReviewEvent>,
+    ): RestoreWriteResult = error("not used")
+
+    override suspend fun markUsefulAndReschedule(id: String): ReviewChange? = error("not used")
 }
 
 private fun savedItem() = SavedItem(

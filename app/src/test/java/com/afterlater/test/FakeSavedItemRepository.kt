@@ -8,12 +8,18 @@ import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.NoteText
 import com.afterlater.core.model.ParsedLink
 import com.afterlater.core.model.ReviewChange
+import com.afterlater.core.model.ReviewEvent
 import com.afterlater.core.model.ReviewUndo
+import com.afterlater.core.model.RestoreWriteResult
 import com.afterlater.core.model.SavedItem
+import com.afterlater.core.model.SurfaceHint
 import com.afterlater.data.repository.SavedItemRepository
+import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.ReviewScheduler
 import com.afterlater.domain.review.SnoozeWindow
+import com.afterlater.domain.review.resolve
 import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -34,14 +40,16 @@ class FakeSavedItemRepository(
     var openResult: ReviewChange? = null
     var snoozeResult: ReviewChange? = null
     var markUsefulResult: ReviewChange? = null
+    var markUsefulAndRescheduleResult: ReviewChange? = null
     var archiveResult: ReviewChange? = null
     var restoreResult: ReviewChange? = null
     var undoResult: ReviewChange? = null
     var deleteResult: Boolean = false
+    var lastDeadlineChoice: ExpiryChoice? = null
 
     override fun observeArchive(
         query: String,
-        status: ItemStatus?,
+        statuses: Set<ItemStatus>?,
         domain: String?,
         sort: ArchiveSort,
     ): Flow<List<SavedItem>> = flowOf(emptyList())
@@ -76,11 +84,39 @@ class FakeSavedItemRepository(
 
     override suspend fun markUseful(id: String): ReviewChange? = markUsefulResult
 
+    override suspend fun markUsefulAndReschedule(id: String): ReviewChange? = markUsefulAndRescheduleResult
+
     override suspend fun archive(id: String): ReviewChange? = archiveResult
 
     override suspend fun restore(id: String): ReviewChange? = restoreResult
 
     override suspend fun undoReview(undo: ReviewUndo): ReviewChange? = undoResult
+
+    override suspend fun setSurfaceHint(id: String, hint: SurfaceHint): SavedItem? {
+        val current = itemFlow.value ?: return null
+        val updated = current.copy(surfaceHint = hint)
+        itemFlow.value = updated
+        return updated
+    }
+
+    override suspend fun setExpiry(id: String, expiresAt: Instant?): SavedItem? {
+        val current = itemFlow.value ?: return null
+        val updated = current.copy(expiresAt = expiresAt)
+        itemFlow.value = updated
+        return updated
+    }
+
+    override suspend fun setDeadline(id: String, choice: ExpiryChoice): SavedItem? {
+        lastDeadlineChoice = choice
+        val resolved = choice.resolve(DEADLINE_NOW, ZONE)
+        return setExpiry(id, resolved)
+    }
+
+    val appliedTags = mutableMapOf<String, List<String>>()
+
+    override suspend fun applyTags(itemId: String, tags: List<String>) {
+        appliedTags[itemId] = tags
+    }
 
     override suspend fun updateNote(id: String, note: String?): SavedItem? {
         updateNoteHandler?.let { return it(id, note) }
@@ -102,4 +138,14 @@ class FakeSavedItemRepository(
 
     override suspend fun exportSnapshot(): ArchiveSnapshot =
         ArchiveSnapshot(items = emptyList(), events = emptyList())
+
+    override suspend fun restoreBackup(
+        items: List<SavedItem>,
+        events: List<ReviewEvent>,
+    ): RestoreWriteResult = RestoreWriteResult(0, 0, 0)
+
+    private companion object {
+        val DEADLINE_NOW: Instant = Instant.parse("2026-03-10T09:00:00Z")
+        val ZONE: ZoneId = ZoneId.of("UTC")
+    }
 }

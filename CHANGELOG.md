@@ -4,6 +4,17 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Capture is fast everywhere: the clipboard reader now keeps trying for
+  ~3.4 seconds (instead of ~0.2) with growing pauses, click-driven reads are
+  deferred instead of dropped, and the copy tap is recognized in 150 ms —
+  the card now appears within about a second even in apps that write the
+  link late (Instagram, Twitter, TikTok).
+- The capture card is glassy (~60% transparent) with a single SAVE button;
+  the card leaves via SAVE or its own timer, and pressing SAVE behaves
+  exactly as before.
+- Smart sorting: a shared ranking — deadline urgency first, then never-opened
+  links, then whatever you have ignored longest — now drives both the daily
+  batch and a new default **SMART** ordering in the archive.
 - Search is now full-text: a new index (database v4) matches whole-word
   prefixes across titles, descriptions, notes, domains, and URLs, so
   "watchlat" finds "watch later" and results stay instant as the archive

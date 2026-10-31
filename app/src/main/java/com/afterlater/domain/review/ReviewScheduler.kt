@@ -65,47 +65,54 @@ object ReviewScheduler {
         lastReviewedAt?.let { !it.isBefore(savedAt) } == true
 
     /**
-     * Builds one day's batch. All never-reviewed entries are considered before
-     * reviewed ones; older saves lead within each group. Domain diversity applies
-     * inside a group, with a stable final ordering for deterministic UI.
+     * Builds one day's batch. Entries are ranked by [SmartSorter] (deadline
+     * urgency, then never-opened, then longest ignored). Deadline entries
+     * lead in strict urgency order — variety never defers them — and each
+     * tier fills completely, with domain-diversity ordering inside the tier,
+     * before the next tier contributes.
      */
     fun selectDailyBatch(candidates: List<SavedItem>, limit: Int, now: Instant): List<SavedItem> {
         val boundedLimit = limit.coerceAtMost(MAX_DAILY_ITEMS)
         if (boundedLimit <= 0) return emptyList()
-        val eligible = candidates
-            .filter { isEligible(it, now) }
-            .sortedWith(
-                compareBy(
-                    { it.savedAt },
-                    { it.nextReviewAt ?: Instant.MAX },
-                    { it.id },
-                ),
-            )
+
+        val ranked = SmartSorter.rank(candidates.filter { isEligible(it, now) })
+        val withDeadline = ranked.filter { it.expiresAt != null }
+        val neverOpened = ranked.filter { it.expiresAt == null && it.lastReviewedAt == null }
+        val reviewed = ranked.filter { it.expiresAt == null && it.lastReviewedAt != null }
 
         val selected = ArrayList<SavedItem>(boundedLimit)
         val seenDomains = HashSet<String>(boundedLimit)
 
-        fun appendGroup(group: List<SavedItem>) {
-            val deferred = ArrayList<SavedItem>()
-            for (item in group) {
-                if (selected.size >= boundedLimit) return
-                if (item.domainKey !in seenDomains) {
-                    selected += item
-                    seenDomains += item.domainKey
-                } else {
-                    deferred += item
-                }
-            }
-            for (item in deferred) {
-                if (selected.size >= boundedLimit) break
+        for (item in withDeadline) {
+            if (selected.size >= boundedLimit) return selected
+            selected += item
+            seenDomains += item.domainKey
+        }
+        appendDiverse(neverOpened, selected, seenDomains, boundedLimit)
+        appendDiverse(reviewed, selected, seenDomains, boundedLimit)
+        return selected
+    }
+
+    private fun appendDiverse(
+        candidates: List<SavedItem>,
+        selected: ArrayList<SavedItem>,
+        seenDomains: MutableSet<String>,
+        limit: Int,
+    ) {
+        val deferred = ArrayList<SavedItem>()
+        for (item in candidates) {
+            if (selected.size >= limit) return
+            if (item.domainKey !in seenDomains) {
                 selected += item
+                seenDomains += item.domainKey
+            } else {
+                deferred += item
             }
         }
-
-        appendGroup(eligible.filter { it.expiresAt != null }.sortedBy { it.expiresAt })
-        appendGroup(eligible.filter { it.expiresAt == null && it.lastReviewedAt == null })
-        appendGroup(eligible.filter { it.expiresAt == null && it.lastReviewedAt != null })
-        return selected
+        for (item in deferred) {
+            if (selected.size >= limit) return
+            selected += item
+        }
     }
 }
 

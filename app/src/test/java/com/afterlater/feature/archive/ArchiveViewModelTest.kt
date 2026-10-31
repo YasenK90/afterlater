@@ -81,7 +81,7 @@ class ArchiveViewModelTest {
             assertEquals(setOf(ItemStatus.ARCHIVED), repository.lastStatuses)
             assertEquals("example.com", repository.lastDomain)
             assertEquals("saved note", repository.lastQuery)
-            assertEquals(ArchiveSort.NEWEST, repository.lastSort)
+            assertEquals(ArchiveSort.SMART, repository.lastSort)
 
             viewModel.setTag("Recipe")
             advanceUntilIdle()

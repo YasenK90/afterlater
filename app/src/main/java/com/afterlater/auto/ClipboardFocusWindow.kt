@@ -62,22 +62,29 @@ class ClipboardFocusWindow(private val serviceContext: Context) {
             deliver(result)
         }
 
-        fun attempt(remaining: Int) {
+        fun attempt(index: Int) {
             if (finished) return
             val value = read()
-            AutoDetectLog.debug("focus: attempt $remaining result=${if (value == null) "null" else "text"}")
+            AutoDetectLog.debug(
+                "focus: attempt ${index + 1}/${CaptureRetryCadence.ATTEMPTS} " +
+                    "result=${if (value == null) "null" else "text"}",
+            )
             if (!value.isNullOrBlank()) {
                 finish(value)
                 return
             }
-            if (remaining <= 0) {
+            if (index >= CaptureRetryCadence.ATTEMPTS - 1) {
+                AutoDetectLog.debug("focus: gave up after ${CaptureRetryCadence.ATTEMPTS} attempts")
                 finish(null)
                 return
             }
-            handler.postDelayed({ attempt(remaining - 1) }, RETRY_DELAY_MILLIS)
+            handler.postDelayed(
+                { attempt(index + 1) },
+                CaptureRetryCadence.retryDelayFor(index),
+            )
         }
 
-        handler.postDelayed({ attempt(MAX_ATTEMPTS) }, FIRST_READ_DELAY_MILLIS)
+        handler.postDelayed({ attempt(0) }, CaptureRetryCadence.FIRST_READ_DELAY_MILLIS)
     }
 
     fun release() {
@@ -93,9 +100,6 @@ class ClipboardFocusWindow(private val serviceContext: Context) {
 
     private companion object {
         const val SIZE_PX = 1
-        const val FIRST_READ_DELAY_MILLIS = 40L
-        const val RETRY_DELAY_MILLIS = 60L
-        const val MAX_ATTEMPTS = 3
         const val WINDOW_TITLE = "afterlater-clipboard-focus"
     }
 }

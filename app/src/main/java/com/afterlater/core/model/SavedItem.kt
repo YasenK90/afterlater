@@ -149,6 +149,8 @@ data class RestoreWriteResult(
 )
 
 enum class ArchiveSort {
+    /** Smart ranking: deadline urgency, never-opened, longest ignored. */
+    SMART,
     NEWEST,
     OLDEST,
     RECENTLY_REVIEWED,

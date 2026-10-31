@@ -30,6 +30,7 @@ import com.afterlater.core.model.SurfaceHint
 import com.afterlater.data.metadata.MetadataScheduler
 import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.ReviewScheduler
+import com.afterlater.domain.review.SmartSorter
 import com.afterlater.domain.review.SnoozeWindow
 import com.afterlater.domain.review.resolve
 import kotlinx.coroutines.CancellationException
@@ -79,7 +80,12 @@ class RoomSavedItemRepository(
                 sort = sort.name,
             )
         }
-        return rows.map { list -> list.map { it.toModel() } }
+        return rows.map { list ->
+            val models = list.map { it.toModel() }
+            // Smart ranking scores in memory — the DAO leaves unknown sort
+            // values at their default ordering.
+            if (sort == ArchiveSort.SMART) SmartSorter.rank(models) else models
+        }
     }
 
     override fun observeItem(id: String): Flow<SavedItem?> =

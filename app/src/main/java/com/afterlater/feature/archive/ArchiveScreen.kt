@@ -77,12 +77,14 @@ import com.afterlater.core.util.TimeFormat
 import java.time.Instant
 
 private val sortOptions = listOf(
+    ArchiveSort.SMART.name to "SMART",
     ArchiveSort.NEWEST.name to "NEWEST",
     ArchiveSort.OLDEST.name to "OLDEST",
     ArchiveSort.RECENTLY_REVIEWED.name to "LAST REVIEWED",
 )
 
 private fun ArchiveSort.label(): String = when (this) {
+    ArchiveSort.SMART -> "SMART"
     ArchiveSort.NEWEST -> "NEWEST"
     ArchiveSort.OLDEST -> "OLDEST"
     ArchiveSort.RECENTLY_REVIEWED -> "LAST REVIEWED"

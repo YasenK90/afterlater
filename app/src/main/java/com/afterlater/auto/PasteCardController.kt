@@ -24,6 +24,15 @@ import com.afterlater.core.model.SurfaceHint
 import com.afterlater.domain.review.ExpiryChoice
 import kotlin.math.roundToInt
 
+/**
+ * The clipboard prompt has two shapes:
+ *
+ * 1. **Collapsed** — a small glassy pill holding only a SAVE button, so a copy
+ *    interrupts as little as possible.
+ * 2. **Expanded** — after SAVE is tapped (or a result message arrives), the
+ *    window grows to the full card with the link details and the SURFACE IT? /
+ *    EXPIRES? / TAG IT? stages. Save behavior is identical in both shapes.
+ */
 class PasteCardController(context: Context) {
 
     private val appContext = context.applicationContext
@@ -32,6 +41,9 @@ class PasteCardController(context: Context) {
     private val density = context.resources.displayMetrics.density
 
     private var cardView: View? = null
+    private var cardLayout: LinearLayout? = null
+    private var layoutParams: WindowManager.LayoutParams? = null
+    private var expandedWidth = 0
     private var stageA: View? = null
     private var stageB: View? = null
     private var tagsColumn: View? = null
@@ -41,6 +53,7 @@ class PasteCardController(context: Context) {
     private var expiryChips: View? = null
     private var surfaceStatus: TextView? = null
     private var expiryStatus: TextView? = null
+    private var headerViews: List<View> = emptyList()
     private var slide: ValueAnimator? = null
     private var targetX = 0
     private var dismissRunnable: Runnable? = null
@@ -51,6 +64,7 @@ class PasteCardController(context: Context) {
     private var onSurface: ((SurfaceHint) -> Unit)? = null
     private var onExpiry: ((ExpiryChoice) -> Unit)? = null
     private var onTags: ((List<String>) -> Unit)? = null
+    private var onDismissCallback: (() -> Unit)? = null
 
     val isShowing: Boolean
         get() = cardView != null
@@ -70,16 +84,30 @@ class PasteCardController(context: Context) {
         this.onSurface = onSurface
         this.onExpiry = onExpiry
         this.onTags = onTags
+        this.onDismissCallback = onDismiss
         selection = PasteCardSelection()
 
         val params = buildLayoutParams()
-        val content = buildContent(link, onSave, onDismiss)
+        val content = buildContent(link, onSave)
 
         return try {
             manager.addView(content, params)
             cardView = content
-            slideIn(manager, content, params)
-            scheduleDismiss(STAGE_DISMISS_MILLIS)
+            layoutParams = params
+            content.post {
+                if (cardView !== content) return@post
+                var width = content.width
+                if (width <= 0) {
+                    // Laid out later than expected — give it one more frame.
+                    content.post {
+                        if (cardView !== content) return@post
+                        showPillAt(manager, content, params)
+                    }
+                    return@post
+                }
+                showPillAt(manager, content, params)
+            }
+            scheduleDismiss(PILL_DISMISS_MILLIS)
             true
         } catch (error: Exception) {
             AutoDetectLog.warning("Could not add the clipboard card", error)
@@ -88,9 +116,21 @@ class PasteCardController(context: Context) {
         }
     }
 
+    private fun showPillAt(
+        manager: WindowManager,
+        content: View,
+        params: WindowManager.LayoutParams,
+    ) {
+        targetX = (appContext.resources.displayMetrics.widthPixels - content.width).coerceAtLeast(0)
+        AutoDetectLog.debug("pill: laid out w=${content.width} h=${content.height} targetX=$targetX")
+        slideIn(manager, content, params)
+    }
+
     fun revealAnnotation() {
-        val status = statusView ?: return
-        status.text = appContext.getString(R.string.paste_card_saved)
+        statusView?.apply {
+            text = appContext.getString(R.string.paste_card_saved)
+            visibility = View.VISIBLE
+        }
         stageA?.visibility = View.GONE
         stageB?.visibility = View.VISIBLE
         scheduleDismiss(ANNOTATION_DISMISS_MILLIS)
@@ -98,15 +138,19 @@ class PasteCardController(context: Context) {
 
     fun showResult(message: String) {
         if (tagsStageRevealed) finishTags()
-        val status = statusView ?: return
-        status.text = message
+        collapse()
         stageA?.visibility = View.GONE
         stageB?.visibility = View.GONE
         tagsColumn?.visibility = View.GONE
+        statusView?.apply {
+            text = message
+            visibility = View.VISIBLE
+        }
         scheduleDismiss(RESULT_DISMISS_MILLIS)
     }
 
     fun dismiss() {
+        if (cardView != null) onDismissCallback?.invoke()
         dismissRunnable?.let(handler::removeCallbacks)
         dismissRunnable = null
         slide?.cancel()
@@ -116,6 +160,9 @@ class PasteCardController(context: Context) {
                 .onFailure { AutoDetectLog.warning("Could not remove the clipboard card", it) }
         }
         cardView = null
+        cardLayout = null
+        layoutParams = null
+        expandedWidth = 0
         stageA = null
         stageB = null
         tagsColumn = null
@@ -125,19 +172,17 @@ class PasteCardController(context: Context) {
         expiryChips = null
         surfaceStatus = null
         expiryStatus = null
+        headerViews = emptyList()
         selection = PasteCardSelection()
         tagsStageRevealed = false
         tagsFinished = false
         onSurface = null
         onExpiry = null
         onTags = null
+        onDismissCallback = null
     }
 
-    private fun buildContent(
-        link: ParsedLink,
-        onSave: () -> Unit,
-        onDismiss: () -> Unit,
-    ): LinearLayout {
+    private fun buildContent(link: ParsedLink, onSave: () -> Unit): LinearLayout {
         val wrapper = LinearLayout(appContext).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, dp(10), 0)
@@ -146,10 +191,13 @@ class PasteCardController(context: Context) {
 
         val card = LinearLayout(appContext).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(14), dp(14))
-            background = roundedDrawable(fill = COLOR_SURFACE, stroke = COLOR_ACCENT)
+            // Collapsed padding keeps the pill slim; expand() switches to the
+            // roomier padding for the full card.
+            setPadding(dp(6), dp(6), dp(10), dp(6))
+            background = roundedDrawable(fill = COLOR_CARD_GLASS, stroke = COLOR_ACCENT)
             elevation = dp(12).toFloat()
         }
+        cardLayout = card
         wrapper.addView(
             card,
             LinearLayout.LayoutParams(
@@ -158,48 +206,50 @@ class PasteCardController(context: Context) {
             ),
         )
 
-        card.addView(
-            TextView(appContext).apply {
-                text = appContext.getString(R.string.paste_card_label)
-                setTextColor(COLOR_ACCENT)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-                typeface = Typeface.MONOSPACE
-                letterSpacing = 0.12f
-            },
-        )
+        val label = TextView(appContext).apply {
+            text = appContext.getString(R.string.paste_card_label)
+            setTextColor(COLOR_ACCENT)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            typeface = Typeface.MONOSPACE
+            letterSpacing = 0.12f
+            visibility = View.GONE
+        }
+        card.addView(label)
 
-        card.addView(
-            TextView(appContext).apply {
-                text = link.domain
-                setTextColor(COLOR_TEXT)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                setPadding(0, dp(5), 0, 0)
-                maxLines = 2
-                ellipsize = TextUtils.TruncateAt.END
-            },
-        )
+        val domain = TextView(appContext).apply {
+            text = link.domain
+            setTextColor(COLOR_TEXT)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setPadding(0, dp(5), 0, 0)
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            visibility = View.GONE
+        }
+        card.addView(domain)
 
-        card.addView(
-            TextView(appContext).apply {
-                text = link.canonicalUrl
-                setTextColor(COLOR_MUTED)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                setPadding(0, dp(4), 0, 0)
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.MIDDLE
-            },
-        )
+        val url = TextView(appContext).apply {
+            text = link.canonicalUrl
+            setTextColor(COLOR_MUTED)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, dp(4), 0, 0)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+            visibility = View.GONE
+        }
+        card.addView(url)
 
         statusView = TextView(appContext).apply {
             text = appContext.getString(R.string.paste_card_body)
             setTextColor(COLOR_MUTED)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setPadding(0, dp(8), 0, 0)
+            visibility = View.GONE
         }
         card.addView(statusView)
+        headerViews = listOf(label, domain, url)
 
-        stageA = buildStageA(onSave, onDismiss).also { card.addView(it) }
+        stageA = buildStageA(onSave).also { card.addView(it) }
         stageB = buildStageB().also {
             it.visibility = View.GONE
             card.addView(it)
@@ -211,40 +261,65 @@ class PasteCardController(context: Context) {
         return wrapper
     }
 
-    private fun buildStageA(onSave: () -> Unit, onDismiss: () -> Unit): LinearLayout {
-        val save = chip(
-            label = appContext.getString(R.string.paste_card_save),
-            fill = COLOR_ACCENT,
-            stroke = COLOR_ACCENT,
-            textColor = COLOR_ACCENT_INK,
-        ).apply {
+    /** The whole collapsed prompt: one small glassy SAVE pill. */
+    private fun buildStageA(onSave: () -> Unit): LinearLayout {
+        val save = TextView(appContext).apply {
+            text = appContext.getString(R.string.paste_card_save)
+            gravity = Gravity.CENTER
+            isAllCaps = true
+            setTextColor(COLOR_ACCENT_INK)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            letterSpacing = 0.08f
+            background = roundedDrawable(fill = COLOR_ACCENT, stroke = COLOR_ACCENT)
+            setPadding(dp(20), 0, dp(20), 0)
+            minHeight = dp(40)
             contentDescription = appContext.getString(R.string.paste_card_save_description)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             setOnClickListener {
                 isEnabled = false
+                expand()
                 statusView?.text = appContext.getString(R.string.paste_card_saving)
                 onSave()
             }
         }
-
-        val close = chip(
-            label = appContext.getString(R.string.paste_card_dismiss),
-            fill = Color.TRANSPARENT,
-            stroke = COLOR_BORDER,
-            textColor = COLOR_TEXT,
-        ).apply {
-            contentDescription = appContext.getString(R.string.paste_card_dismiss_description)
-            setOnClickListener {
-                onDismiss()
-                dismiss()
-            }
-        }
-
         return LinearLayout(appContext).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(14), 0, 0)
-            addView(save, LinearLayout.LayoutParams(0, dp(46), 1f))
-            addView(Space(appContext), LinearLayout.LayoutParams(dp(8), 1))
-            addView(close, LinearLayout.LayoutParams(0, dp(46), 1f))
+            gravity = Gravity.CENTER
+            addView(save, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)))
+        }
+    }
+
+    /** Grows the window to the full card and reveals the link details. */
+    private fun expand() {
+        cardLayout?.setPadding(dp(16), dp(16), dp(14), dp(14))
+        headerViews.forEach { it.visibility = View.VISIBLE }
+        statusView?.visibility = View.VISIBLE
+        val manager = windowManager
+        val params = layoutParams
+        val view = cardView
+        if (manager != null && params != null && view != null &&
+            params.width != expandedWidth && expandedWidth > 0
+        ) {
+            params.width = expandedWidth
+            runCatching { manager.updateViewLayout(view, params) }
+                .onFailure { AutoDetectLog.warning("Could not expand the clipboard card", it) }
+        }
+    }
+
+    /** Shrinks the window back to its pill size for the result message. */
+    private fun collapse() {
+        cardLayout?.setPadding(dp(6), dp(6), dp(10), dp(6))
+        headerViews.forEach { it.visibility = View.GONE }
+        val manager = windowManager
+        val params = layoutParams
+        val view = cardView
+        if (manager != null && params != null && view != null &&
+            params.width != WindowManager.LayoutParams.WRAP_CONTENT
+        ) {
+            params.width = WindowManager.LayoutParams.WRAP_CONTENT
+            runCatching { manager.updateViewLayout(view, params) }
+                .onFailure { AutoDetectLog.warning("Could not collapse the clipboard card", it) }
         }
     }
 
@@ -285,6 +360,101 @@ class PasteCardController(context: Context) {
         }
 
         return column
+    }
+
+    private fun buildStageC(): LinearLayout {
+        val column = LinearLayout(appContext).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(2), 0, 0)
+            contentDescription = appContext.getString(R.string.paste_card_tags_description)
+        }
+
+        column.addView(caption(appContext.getString(R.string.paste_card_tags_title)))
+        tagsRows = buildTagRows().also { column.addView(it) }
+
+        val skip = chip(
+            label = appContext.getString(R.string.paste_card_tags_skip),
+            fill = Color.TRANSPARENT,
+            stroke = COLOR_BORDER,
+            textColor = COLOR_TEXT,
+        ).apply {
+            setOnClickListener {
+                finishTags()
+                dismiss()
+            }
+        }
+        column.addView(
+            skip,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38))
+                .apply { topMargin = dp(8) },
+        )
+        return column
+    }
+
+    private fun buildTagRows(): LinearLayout {
+        val presets = listOf(
+            R.string.tag_useful,
+            R.string.tag_offer_ending_today,
+            R.string.tag_watch_later,
+            R.string.tag_recipe,
+            R.string.tag_buy_it,
+        )
+        val container = LinearLayout(appContext).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        presets.chunked(TAGS_PER_ROW).forEachIndexed { rowIndex, rowNames ->
+            if (rowIndex > 0) {
+                container.addView(Space(appContext), LinearLayout.LayoutParams(1, dp(6)))
+            }
+            val row = LinearLayout(appContext).apply { orientation = LinearLayout.HORIZONTAL }
+            rowNames.forEachIndexed { index, nameRes ->
+                val name = appContext.getString(nameRes)
+                if (index > 0) row.addView(Space(appContext), LinearLayout.LayoutParams(dp(6), 1))
+                val selected = name in selection.tags
+                row.addView(
+                    chip(
+                        label = name,
+                        fill = if (selected) COLOR_ACCENT else Color.TRANSPARENT,
+                        stroke = if (selected) COLOR_ACCENT else COLOR_BORDER,
+                        textColor = if (selected) COLOR_ACCENT_INK else COLOR_TEXT,
+                    ).apply {
+                        setOnClickListener { toggleTag(name) }
+                    },
+                    LinearLayout.LayoutParams(0, dp(38), 1f),
+                )
+            }
+            container.addView(
+                row,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        return container
+    }
+
+    private fun toggleTag(name: String) {
+        selection = selection.withTag(name)
+        val rows = tagsRows ?: return
+        val parent = rows.parent as? LinearLayout ?: return
+        val index = parent.indexOfChild(rows)
+        parent.removeView(rows)
+        val rebuilt = buildTagRows()
+        tagsRows = rebuilt
+        parent.addView(rebuilt, index)
+    }
+
+    private fun revealTagsStage() {
+        tagsColumn?.visibility = View.VISIBLE
+        tagsStageRevealed = true
+        scheduleDismiss(ANNOTATION_DISMISS_MILLIS)
+    }
+
+    private fun finishTags() {
+        if (tagsFinished) return
+        tagsFinished = true
+        onTags?.invoke(selection.tags)
     }
 
     private fun annotationStatus(): TextView = TextView(appContext).apply {
@@ -349,101 +519,6 @@ class PasteCardController(context: Context) {
         }
     }
 
-    private fun buildStageC(): LinearLayout {
-        val column = LinearLayout(appContext).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(2), 0, 0)
-            contentDescription = appContext.getString(R.string.paste_card_tags_description)
-        }
-
-        column.addView(caption(appContext.getString(R.string.paste_card_tags_title)))
-        tagsRows = buildTagRows().also { column.addView(it) }
-
-        val skip = chip(
-            label = appContext.getString(R.string.paste_card_tags_skip),
-            fill = Color.TRANSPARENT,
-            stroke = COLOR_BORDER,
-            textColor = COLOR_TEXT,
-        ).apply {
-            setOnClickListener {
-                finishTags()
-                dismiss()
-            }
-        }
-        column.addView(
-            skip,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38))
-                .apply { topMargin = dp(8) },
-        )
-        return column
-    }
-
-    private fun buildTagRows(): LinearLayout {
-        val presets = listOf(
-            R.string.tag_useful,
-            R.string.tag_offer_ending_today,
-            R.string.tag_watch_later,
-            R.string.tag_recipe,
-            R.string.tag_buy_it,
-        )
-        val container = LinearLayout(appContext).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        presets.chunked(TAGS_PER_ROW).forEachIndexed { rowIndex, rowNames ->
-            if (rowIndex > 0) {
-                container.addView(Space(appContext), LinearLayout.LayoutParams(1, dp(6)))
-            }
-            val row = LinearLayout(appContext).apply { orientation = LinearLayout.HORIZONTAL }
-            rowNames.forEachIndexed { index, nameRes ->
-                val name = appContext.getString(nameRes)
-                if (index > 0) row.addView(Space(appContext), LinearLayout.LayoutParams(dp(6), 1))
-                val selected = name in selection.tags
-                row.addView(
-                    chip(
-                        label = name,
-                        fill = if (selected) COLOR_ACCENT else COLOR_SURFACE,
-                        stroke = if (selected) COLOR_ACCENT else COLOR_BORDER,
-                        textColor = if (selected) COLOR_ACCENT_INK else COLOR_TEXT,
-                    ).apply {
-                        setOnClickListener { toggleTag(name) }
-                    },
-                    LinearLayout.LayoutParams(0, dp(38), 1f),
-                )
-            }
-            container.addView(
-                row,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
-        return container
-    }
-
-    private fun toggleTag(name: String) {
-        selection = selection.withTag(name)
-        val rows = tagsRows ?: return
-        val parent = rows.parent as? LinearLayout ?: return
-        val index = parent.indexOfChild(rows)
-        parent.removeView(rows)
-        val rebuilt = buildTagRows()
-        tagsRows = rebuilt
-        parent.addView(rebuilt, index)
-    }
-
-    private fun revealTagsStage() {
-        tagsColumn?.visibility = View.VISIBLE
-        tagsStageRevealed = true
-        scheduleDismiss(ANNOTATION_DISMISS_MILLIS)
-    }
-
-    private fun finishTags() {
-        if (tagsFinished) return
-        tagsFinished = true
-        onTags?.invoke(selection.tags)
-    }
-
     private fun scheduleDismissAfterAnswer() {
         scheduleDismiss(
             if (selection.isComplete) RESULT_DISMISS_MILLIS else SECOND_ANSWER_MILLIS,
@@ -496,12 +571,11 @@ class PasteCardController(context: Context) {
 
     private fun buildLayoutParams(): WindowManager.LayoutParams {
         val screenWidth = appContext.resources.displayMetrics.widthPixels
-        val width = (screenWidth * WIDTH_FRACTION).roundToInt()
+        expandedWidth = (screenWidth * WIDTH_FRACTION).roundToInt()
             .coerceAtMost(dp(340))
             .coerceAtLeast(dp(240))
-        targetX = (screenWidth - width).coerceAtLeast(0)
         return WindowManager.LayoutParams(
-            width,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -546,12 +620,17 @@ class PasteCardController(context: Context) {
     private companion object {
         const val WIDTH_FRACTION = 0.86f
         const val TAGS_PER_ROW = 2
-        const val STAGE_DISMISS_MILLIS = 20_000L
+
+        /** How long the collapsed pill lingers when ignored. */
+        const val PILL_DISMISS_MILLIS = 8_000L
         const val ANNOTATION_DISMISS_MILLIS = 40_000L
         const val SECOND_ANSWER_MILLIS = 20_000L
         const val RESULT_DISMISS_MILLIS = 2_200L
         const val SLIDE_IN_MILLIS = 220L
         val COLOR_SURFACE = Color.parseColor("#181A18")
+
+        /** The card's glass: gray ink at ~40% opacity for a faint gray tint. */
+        const val COLOR_CARD_GLASS = 0x663A3D3A.toInt()
         val COLOR_BORDER = Color.parseColor("#4A4F46")
         val COLOR_TEXT = Color.parseColor("#F1F0E9")
         val COLOR_MUTED = Color.parseColor("#9A9E96")

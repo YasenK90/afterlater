@@ -63,7 +63,7 @@ class ArchiveViewModel(
     private val _tagFilter = MutableStateFlow<String?>(null)
     val tagFilter: StateFlow<String?> = _tagFilter.asStateFlow()
 
-    private val _sort = MutableStateFlow(ArchiveSort.NEWEST)
+    private val _sort = MutableStateFlow(ArchiveSort.SMART)
     val sort: StateFlow<ArchiveSort> = _sort.asStateFlow()
 
     private val _layout = MutableStateFlow(ArchiveLayout.VISUAL)

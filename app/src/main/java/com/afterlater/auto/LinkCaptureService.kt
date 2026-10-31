@@ -2,6 +2,7 @@ package com.afterlater.auto
 
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import com.afterlater.AfterLaterApplication
 import com.afterlater.AppContainer
 import com.afterlater.R
@@ -27,6 +28,9 @@ class LinkCaptureService : AccessibilityService() {
     private val throttle = PromptThrottle()
     private val clipboardThrottle = PromptThrottle(
         globalCooldownMillis = CLIPBOARD_GLOBAL_COOLDOWN_MILLIS,
+        // A missed card must be recoverable by re-copying the same link within
+        // a minute, not ten.
+        sameVideoCooldownMillis = CLIPBOARD_SAME_URL_COOLDOWN_MILLIS,
     )
 
     private lateinit var container: AppContainer
@@ -49,6 +53,7 @@ class LinkCaptureService : AccessibilityService() {
             clipboardMonitor = ClipboardMonitor(
                 context = this,
                 isEnabled = { settings.clipboardCaptureEnabled },
+                isKeyboardVisible = ::isKeyboardVisible,
                 onLink = ::onClipboardLink,
             )
             initialized = true
@@ -86,12 +91,25 @@ class LinkCaptureService : AccessibilityService() {
             current.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED &&
             !isTextEntryTap(current)
         ) {
-            clipboardMonitor.onInteraction()
+            clipboardMonitor.onInteraction(looksLikeCopy = isCopyAffordance(current))
         }
 
-        if (!settings.tiktokAutoDetectEnabled) return
+        // TikTok and Instagram do not deliver click events for their copy
+        // buttons, but the share sheet closing and app switches produce
+        // window/content/scroll events — read the clipboard on those too
+        // (rate-limited, so scrolling stays smooth).
+        if (
+            settings.clipboardCaptureEnabled &&
+            current.eventType in CLIPBOARD_WINDOW_EVENTS
+        ) {
+            clipboardMonitor.onWindowChange()
+        }
+
+        val wantsTikTokScan = settings.tiktokAutoDetectEnabled ||
+            (settings.clipboardCaptureEnabled && eventPackage in TikTokVideoDetector.TIKTOK_PACKAGES)
+        if (!wantsTikTokScan) return
         if (eventPackage !in TikTokVideoDetector.TIKTOK_PACKAGES) {
-            if (current.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (settings.tiktokAutoDetectEnabled && current.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 overlay.dismiss()
             }
             return
@@ -103,6 +121,28 @@ class LinkCaptureService : AccessibilityService() {
     private fun isTextEntryTap(event: AccessibilityEvent): Boolean =
         runCatching { event.source?.isEditable == true }.getOrDefault(false)
 
+    /** True while an IME window is on screen — the moment focus reads must
+     * not steal input focus from the user's typing. */
+    private fun isKeyboardVisible(): Boolean = runCatching {
+        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+    }.getOrDefault(false)
+
+    /**
+     * True when the tapped node looks like a copy affordance. Such taps bypass
+     * the focus-read rate limit: copying is exactly when a clipboard read is
+     * worth stealing focus for, while ordinary browsing taps are not.
+     */
+    private fun isCopyAffordance(event: AccessibilityEvent): Boolean = runCatching {
+        val node = event.source
+        val haystack = buildList {
+            addAll(event.text.map { it.toString() })
+            node?.text?.let { add(it.toString()) }
+            node?.contentDescription?.let { add(it.toString()) }
+            node?.viewIdResourceName?.let { add(it) }
+        }.joinToString(" ").lowercase()
+        COPY_KEYWORDS.any(haystack::contains)
+    }.getOrDefault(false)
+
     private fun scheduleScan(eventType: Int) {
         scanJob?.cancel()
         scanJob = serviceScope.launch {
@@ -112,7 +152,10 @@ class LinkCaptureService : AccessibilityService() {
     }
 
     private suspend fun scan(eventType: Int) {
-        if (!settings.tiktokAutoDetectEnabled || overlay.isShowing) return
+        val tiktokPrompt = settings.tiktokAutoDetectEnabled
+        val watchClipboard = settings.clipboardCaptureEnabled
+        if (!tiktokPrompt && !watchClipboard) return
+        if (tiktokPrompt && overlay.isShowing) return
         if (!AutoDetectPermissions.canDrawOverlays(this)) {
             AutoDetectLog.debug("overlay permission missing")
             return
@@ -128,7 +171,8 @@ class LinkCaptureService : AccessibilityService() {
         AutoDetectLog.debug(
             "event=$eventType shareSheet=$shareSheet text=${detector.visibleText(snapshots)}",
         )
-        if (!shareSheet) return
+        if (watchClipboard && shareSheet) clipboardMonitor.beginCopyWatch()
+        if (!tiktokPrompt || !shareSheet) return
 
         val video = detector.detect(snapshots) ?: return
         val now = container.clock.millis()
@@ -302,6 +346,17 @@ class LinkCaptureService : AccessibilityService() {
     private companion object {
         const val SCAN_DEBOUNCE_MILLIS = 350L
         const val CLIPBOARD_GLOBAL_COOLDOWN_MILLIS = 3_000L
+        const val CLIPBOARD_SAME_URL_COOLDOWN_MILLIS = 60_000L
+
+        /** Copy-button labels across the languages the beta covers. */
+        val COPY_KEYWORDS = listOf("copy", "copiar", "copier", "копиров", "نسخ", "复制", "複製")
+
+        /** Window/content/scroll events that can accompany a copy action. */
+        val CLIPBOARD_WINDOW_EVENTS = setOf(
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED,
+        )
         val WANTED_EVENTS = setOf(
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,

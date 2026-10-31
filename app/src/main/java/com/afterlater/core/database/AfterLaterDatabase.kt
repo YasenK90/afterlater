@@ -14,8 +14,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReviewEventEntity::class,
         TagEntity::class,
         SavedItemTagEntity::class,
+        SavedItemFtsEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -61,9 +62,31 @@ abstract class AfterLaterDatabase : RoomDatabase() {
             }
         }
 
+        // The FTS create statement matches Room's exported 4.json exactly.
+        // Room manages the sync-trigger lifecycle itself (drops them before
+        // user migrations, recreates them after), so this migration only
+        // creates the table and backfills it — without the backfill, every
+        // entry saved before the update would be invisible to search.
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS `saved_items_fts` " +
+                        "USING FTS4(" +
+                        "`title` TEXT, `description` TEXT, `personalNote` TEXT, " +
+                        "`domain` TEXT NOT NULL, `originalUrl` TEXT NOT NULL, " +
+                        "`canonicalUrl` TEXT NOT NULL, " +
+                        "tokenize=unicode61, content=`saved_items`)",
+                )
+                database.execSQL(
+                    "INSERT INTO `saved_items_fts`(docid, `title`, `description`, `personalNote`, `domain`, `originalUrl`, `canonicalUrl`) " +
+                        "SELECT rowid, `title`, `description`, `personalNote`, `domain`, `originalUrl`, `canonicalUrl` FROM `saved_items`",
+                )
+            }
+        }
+
         fun build(context: Context): AfterLaterDatabase =
             Room.databaseBuilder(context, AfterLaterDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

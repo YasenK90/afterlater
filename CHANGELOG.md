@@ -4,6 +4,12 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Search is now full-text: a new index (database v4) matches whole-word
+  prefixes across titles, descriptions, notes, domains, and URLs, so
+  "watchlat" finds "watch later" and results stay instant as the archive
+  grows. Entries saved before the update are searchable too — the migration
+  backfills the index, and this is verified by migration tests.
+
 ## 1.2 — 2026-10
 
 - Compose UI tests now run on the JVM (Robolectric): the snooze dialog's

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,21 +76,81 @@ class SavedItemDaoTest {
         assertEquals(1, dao.observeDueCount(now = 9_000).first())
     }
 
+    @Test
+    fun `search matches title tokens across all statuses`() = runBlocking {
+        dao.insert(item(id = "hit", title = "Kumquat harvest guide"))
+        dao.insert(item(id = "miss", title = "Something else"))
+
+        val found = dao.observeArchiveSearch(
+            match = "kumquat*",
+            statuses = listOf("NEW", "READY", "SNOOZED", "USEFUL", "ARCHIVED"),
+            domain = null,
+            tag = null,
+            sort = "NEWEST",
+        ).first().map { it.id }
+
+        assertEquals(listOf("hit"), found)
+    }
+
+    @Test
+    fun `search composes with the status filter`() = runBlocking {
+        dao.insert(item(id = "archived-hit", title = "Kumquat harvest"))
+        dao.insert(
+            item(
+                id = "ready-hit",
+                title = "Kumquat festival",
+                status = ItemStatus.READY,
+            ),
+        )
+
+        val found = dao.observeArchiveSearch(
+            match = "kumquat*",
+            statuses = listOf("READY"),
+            domain = null,
+            tag = null,
+            sort = "NEWEST",
+        ).first().map { it.id }
+
+        assertEquals(listOf("ready-hit"), found)
+    }
+
+    @Test
+    fun `updates and deletes keep the search index in sync`() = runBlocking {
+        dao.insert(item(id = "one", title = "Kumquat harvest"))
+        dao.getById("one")!!.let { dao.update(it.copy(personalNote = "marmalade recipe")) }
+
+        assertEquals(listOf("one"), searchIds("marmalade"))
+        dao.deleteById("one")
+
+        assertTrue(searchIds("kumquat").isEmpty())
+    }
+
+    private suspend fun searchIds(term: String): List<String> =
+        dao.observeArchiveSearch(
+            match = "$term*",
+            statuses = listOf("NEW", "READY", "SNOOZED", "USEFUL", "ARCHIVED"),
+            domain = null,
+            tag = null,
+            sort = "NEWEST",
+        ).first().map { it.id }
+
     private fun item(
         id: String,
         expiresAt: Long? = null,
         snoozedUntil: Long? = null,
+        title: String? = null,
+        status: ItemStatus = ItemStatus.NEW,
     ) = SavedItemEntity(
         id = id,
         originalUrl = "https://example.com/$id",
         canonicalUrl = "https://example.com/$id",
-        title = null,
+        title = title,
         description = null,
         domain = "example.com",
         thumbnailUrl = null,
         savedAt = 1_000,
         updatedAt = 1_000,
-        status = ItemStatus.READY,
+        status = status,
         lastReviewedAt = null,
         nextReviewAt = 1_000,
         snoozedUntil = snoozedUntil,

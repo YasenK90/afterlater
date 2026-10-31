@@ -5,7 +5,7 @@ import android.database.sqlite.SQLiteException
 import android.util.Log
 import androidx.room.withTransaction
 import com.afterlater.core.database.AfterLaterDatabase
-import com.afterlater.core.database.ArchiveSearch
+import com.afterlater.core.database.FtsQueryBuilder
 import com.afterlater.core.database.ReviewEventEntity
 import com.afterlater.core.database.SavedItemEntity
 import com.afterlater.core.database.SavedItemTagEntity
@@ -57,13 +57,30 @@ class RoomSavedItemRepository(
         domain: String?,
         tag: String?,
         sort: ArchiveSort,
-    ): Flow<List<SavedItem>> = items.observeArchive(
-        query = ArchiveSearch.escapeLikePattern(query.trim()),
-        statuses = (statuses ?: ItemStatus.entries.toSet()).map { it.name },
-        domain = domain,
-        tag = tag?.trim()?.takeIf { it.isNotEmpty() },
-        sort = sort.name,
-    ).map { rows -> rows.map { it.toModel() } }
+    ): Flow<List<SavedItem>> {
+        val statusNames = (statuses ?: ItemStatus.entries.toSet()).map { it.name }
+        val tagFilter = tag?.trim()?.takeIf { it.isNotEmpty() }
+        val match = FtsQueryBuilder.matchQuery(query.trim())
+
+        val rows = if (match == null) {
+            items.observeArchive(
+                query = "",
+                statuses = statusNames,
+                domain = domain,
+                tag = tagFilter,
+                sort = sort.name,
+            )
+        } else {
+            items.observeArchiveSearch(
+                match = match,
+                statuses = statusNames,
+                domain = domain,
+                tag = tagFilter,
+                sort = sort.name,
+            )
+        }
+        return rows.map { list -> list.map { it.toModel() } }
+    }
 
     override fun observeItem(id: String): Flow<SavedItem?> =
         items.observeById(id).map { it?.toModel() }

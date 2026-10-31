@@ -59,6 +59,33 @@ interface SavedItemDao {
         sort: String,
     ): Flow<List<SavedItemEntity>>
 
+    /** Full-text variant; [match] must be non-empty (MATCH '' is an error). */
+    @Query(
+        """
+        SELECT saved_items.* FROM saved_items
+        JOIN saved_items_fts ON saved_items.rowid = saved_items_fts.docid
+        WHERE saved_items_fts MATCH :match
+        AND saved_items.status IN (:statuses)
+        AND (:domain IS NULL OR saved_items.domain = :domain)
+        AND (:tag IS NULL OR EXISTS (
+            SELECT 1 FROM saved_item_tags st
+            WHERE st.itemId = saved_items.id AND st.tagName = :tag
+        ))
+        ORDER BY
+            CASE WHEN :sort = 'NEWEST' THEN saved_items.savedAt END DESC,
+            CASE WHEN :sort = 'OLDEST' THEN saved_items.savedAt END ASC,
+            CASE WHEN :sort = 'RECENTLY_REVIEWED' THEN COALESCE(saved_items.lastReviewedAt, 0) END DESC,
+            saved_items.savedAt DESC
+        """,
+    )
+    fun observeArchiveSearch(
+        match: String,
+        statuses: List<String>,
+        domain: String?,
+        tag: String?,
+        sort: String,
+    ): Flow<List<SavedItemEntity>>
+
     @Query("SELECT DISTINCT domain FROM saved_items ORDER BY domain COLLATE NOCASE")
     fun observeDomains(): Flow<List<String>>
 

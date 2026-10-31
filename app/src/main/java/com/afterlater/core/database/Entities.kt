@@ -2,9 +2,11 @@ package com.afterlater.core.database
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Fts4
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import androidx.room.FtsOptions
 import com.afterlater.core.model.ItemStatus
 import com.afterlater.core.model.MetadataStatus
 import com.afterlater.core.model.ReviewAction
@@ -95,6 +97,23 @@ data class TagEntity(
 data class SavedItemTagEntity(
     val itemId: String,
     val tagName: String,
+)
+
+/**
+ * External-content full-text index over the searchable columns of
+ * [SavedItemEntity]. Room's generated sync triggers keep it in step with
+ * saved_items; MIGRATION_3_4 must recreate both the table and the triggers
+ * for pre-existing installs.
+ */
+@Fts4(contentEntity = SavedItemEntity::class, tokenizer = FtsOptions.TOKENIZER_UNICODE61)
+@Entity(tableName = "saved_items_fts")
+data class SavedItemFtsEntity(
+    val title: String?,
+    val description: String?,
+    val personalNote: String?,
+    val domain: String,
+    val originalUrl: String,
+    val canonicalUrl: String,
 )
 
 fun SavedItem.toEntity() = SavedItemEntity(

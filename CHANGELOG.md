@@ -4,6 +4,11 @@ Notable changes to AFTERLATER. Dates use the release year and month.
 
 ## Unreleased
 
+- Auto-categorization: saved links are suggested into **DESIGN**, **CODING**,
+  **OFFER**, or **AI** — from the domain at capture time, sharpened by the
+  page's title and description once the preview is fetched. The suggestion
+  arrives pre-selected in the clipboard card's TAG IT? stage (untick it if
+  it's wrong), and shows up in the archive's TAG filter like any tag.
 - Capture is fast everywhere: the clipboard reader now keeps trying for
   ~3.4 seconds (instead of ~0.2) with growing pauses, click-driven reads are
   deferred instead of dropped, and the copy tap is recognized in 150 ms —

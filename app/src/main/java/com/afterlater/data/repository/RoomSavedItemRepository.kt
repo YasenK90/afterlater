@@ -28,6 +28,7 @@ import com.afterlater.core.model.RestoreWriteResult
 import com.afterlater.core.model.SavedItem
 import com.afterlater.core.model.SurfaceHint
 import com.afterlater.data.metadata.MetadataScheduler
+import com.afterlater.domain.categorize.LinkCategorizer
 import com.afterlater.domain.review.ExpiryChoice
 import com.afterlater.domain.review.ReviewScheduler
 import com.afterlater.domain.review.SmartSorter
@@ -137,6 +138,13 @@ class RoomSavedItemRepository(
 
         return try {
             items.insert(entity)
+            // Auto-categorize from the URL at capture time; the metadata
+            // worker may add a sharper category later once the page's title
+            // and description are known.
+            LinkCategorizer.suggest(link.domain, link.canonicalUrl, null, null)?.let { category ->
+                tags.insertTag(TagEntity(category, now.toEpochMilli()))
+                tags.attach(SavedItemTagEntity(entity.id, category))
+            }
             enqueueMetadataBestEffort(entity.id)
             CaptureResult.Saved(entity.toModel())
         } catch (_: SQLiteConstraintException) {
@@ -391,23 +399,45 @@ class RoomSavedItemRepository(
 
     override suspend fun applyTags(itemId: String, tags: List<String>) {
         try {
-            database.withTransaction {
-                val existing = items.getById(itemId) ?: return@withTransaction
-                this.tags.detachAll(itemId)
-                val now = clock.instant()
-                tags.map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                    .distinct()
-                    .forEach { name ->
-                        this.tags.insertTag(TagEntity(name, now.toEpochMilli()))
-                        this.tags.attach(SavedItemTagEntity(itemId, name))
-                    }
-                items.update(existing.copy(updatedAt = now.toEpochMilli()))
-            }
+            writeTags(itemId, tags)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             Log.w("AFTERLATER", "Tags failed for $itemId", error)
+        }
+    }
+
+    override suspend fun addTags(itemId: String, newTags: List<String>) {
+        try {
+            database.withTransaction {
+                val existing = this.tags.tagsForItem(itemId)
+                val merged = (existing + newTags.map { it.trim() })
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                if (merged == existing) return@withTransaction
+                writeTags(itemId, merged)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("AFTERLATER", "Add tags failed for $itemId", error)
+        }
+    }
+
+    /** Replaces an entry's tags with [tags]; keeps [updatedAt] fresh, writes no event. */
+    private suspend fun writeTags(itemId: String, tags: List<String>) {
+        database.withTransaction {
+            val existing = items.getById(itemId) ?: return@withTransaction
+            this.tags.detachAll(itemId)
+            val now = clock.instant()
+            tags.map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .forEach { name ->
+                    this.tags.insertTag(TagEntity(name, now.toEpochMilli()))
+                    this.tags.attach(SavedItemTagEntity(itemId, name))
+                }
+            items.update(existing.copy(updatedAt = now.toEpochMilli()))
         }
     }
 

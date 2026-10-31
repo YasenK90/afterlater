@@ -71,6 +71,7 @@ class PasteCardController(context: Context) {
 
     fun show(
         link: ParsedLink,
+        preselectedTags: List<String> = emptyList(),
         onSave: () -> Unit,
         onDismiss: () -> Unit,
         onSurface: (SurfaceHint) -> Unit,
@@ -85,7 +86,7 @@ class PasteCardController(context: Context) {
         this.onExpiry = onExpiry
         this.onTags = onTags
         this.onDismissCallback = onDismiss
-        selection = PasteCardSelection()
+        selection = PasteCardSelection(tags = preselectedTags)
 
         val params = buildLayoutParams()
         val content = buildContent(link, onSave)

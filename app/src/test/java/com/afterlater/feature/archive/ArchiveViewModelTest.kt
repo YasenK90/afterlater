@@ -232,6 +232,8 @@ private class FakeArchiveRepository : SavedItemRepository {
 
     override suspend fun applyTags(itemId: String, tags: List<String>) = Unit
 
+    override suspend fun addTags(itemId: String, tags: List<String>) = Unit
+
     override suspend fun updateNote(id: String, note: String?): SavedItem? = error("not used")
 
     override suspend fun applyMetadata(id: String, metadata: ItemMetadata) = Unit

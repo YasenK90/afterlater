@@ -10,6 +10,7 @@ import com.afterlater.core.model.AppSettings
 import com.afterlater.core.model.CaptureResult
 import com.afterlater.core.model.ParsedLink
 import com.afterlater.core.model.SurfaceHint
+import com.afterlater.domain.categorize.LinkCategorizer
 import com.afterlater.domain.review.ExpiryChoice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -248,8 +249,13 @@ class LinkCaptureService : AccessibilityService() {
         }
         pendingItemId = null
 
+        // The categorizer's URL-based suggestion arrives before the user
+        // answers anything, so TAG IT? can offer it pre-selected.
+        val suggestedCategory = LinkCategorizer.suggest(link.domain, link.canonicalUrl, null, null)
+
         val shown = pasteCard.show(
             link = link,
+            preselectedTags = listOfNotNull(suggestedCategory),
             onSave = { saveFromClipboard(link) },
             onDismiss = { AutoDetectLog.debug("clipboard card dismissed ${link.canonicalUrl}") },
             onSurface = ::applySurfaceHint,
@@ -317,7 +323,8 @@ class LinkCaptureService : AccessibilityService() {
 
     private fun applyTags(tags: List<String>) {
         val id = pendingItemId ?: return
-        if (tags.isEmpty()) return
+        // An empty list is meaningful: the user removed the auto-suggested
+        // tag, so applyTags clears it.
         serviceScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {

@@ -52,6 +52,7 @@ interface SavedItemRepository {
     suspend fun setExpiry(id: String, expiresAt: Instant?): SavedItem?
     suspend fun setDeadline(id: String, choice: ExpiryChoice): SavedItem?
     suspend fun applyTags(itemId: String, tags: List<String>)
+    suspend fun addTags(itemId: String, tags: List<String>)
     suspend fun updateNote(id: String, note: String?): SavedItem?
     suspend fun delete(id: String): Boolean
     suspend fun applyMetadata(id: String, metadata: ItemMetadata)

@@ -214,6 +214,8 @@ private class FakeShareRepository : SavedItemRepository {
 
     override suspend fun applyTags(itemId: String, tags: List<String>) = Unit
 
+    override suspend fun addTags(itemId: String, tags: List<String>) = Unit
+
     override fun observeTags(): Flow<List<String>> = flowOf(emptyList())
 
     override fun observeTagsForItem(itemId: String): Flow<List<String>> = flowOf(emptyList())

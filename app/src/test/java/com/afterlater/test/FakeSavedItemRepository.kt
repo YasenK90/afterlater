@@ -136,6 +136,13 @@ class FakeSavedItemRepository(
         allTags.value = (allTags.value + tags).distinct().sorted()
     }
 
+    override suspend fun addTags(itemId: String, tags: List<String>) {
+        val merged = ((itemTags.value[itemId].orEmpty()) + tags).distinct()
+        appliedTags[itemId] = merged
+        itemTags.value = itemTags.value + (itemId to merged)
+        allTags.value = (allTags.value + merged).distinct().sorted()
+    }
+
     override fun observeTags(): Flow<List<String>> = allTags
 
     override fun observeTagsForItem(itemId: String): Flow<List<String>> =

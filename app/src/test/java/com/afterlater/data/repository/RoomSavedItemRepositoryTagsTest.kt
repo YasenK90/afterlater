@@ -99,6 +99,16 @@ class RoomSavedItemRepositoryTagsTest {
         assertTrue(database.tagDao().tagsForItem("one").isEmpty())
     }
 
+    @Test
+    fun `addTags merges with existing tags instead of replacing them`() = runBlocking {
+        database.savedItemDao().insert(item(id = "one"))
+        repository.applyTags("one", listOf("Recipe"))
+
+        repository.addTags("one", listOf("CODING", "Recipe"))
+
+        assertEquals(listOf("CODING", "Recipe"), database.tagDao().tagsForItem("one"))
+    }
+
     private fun item(
         id: String,
         updatedAt: Long = 1_000,

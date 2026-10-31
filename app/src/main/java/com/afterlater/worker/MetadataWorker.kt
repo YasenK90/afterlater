@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import com.afterlater.AfterLaterApplication
 import com.afterlater.core.model.MetadataStatus
 import com.afterlater.data.metadata.MetadataResult
+import com.afterlater.domain.categorize.LinkCategorizer
 import kotlinx.coroutines.CancellationException
 
 class MetadataWorker(
@@ -25,6 +26,15 @@ class MetadataWorker(
             when (val result = container.metadataExtractor.extract(item.originalUrl)) {
                 is MetadataResult.Success -> {
                     repository.applyMetadata(itemId, result.metadata)
+                    // With the page's title and description known, the
+                    // category suggestion can now use keywords, not just the
+                    // URL — added as a tag without touching the user's own.
+                    LinkCategorizer.suggest(
+                        domain = item.domain,
+                        canonicalUrl = item.canonicalUrl,
+                        title = result.metadata.title,
+                        description = result.metadata.description,
+                    )?.let { repository.addTags(itemId, listOf(it)) }
                     Result.success()
                 }
 
